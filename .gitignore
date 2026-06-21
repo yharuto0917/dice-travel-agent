@@ -1,0 +1,32 @@
+# turbo
+.turbo
+
+# open-next
+.open-next
+.next
+dist/
+
+# Node.js
+node_modules/
+npm-debug.log
+.pnpm-debugdebug.log
+build/
+
+# dars
+.dev.vars
+
+# cloudflare
+.wrangler
+cloudflare-env.d.ts
+
+# env
+.env*
+*.env
+
+# DS-Store
+.DS-Store
+
+# VSCode
+.vscode/
+.idea/
+

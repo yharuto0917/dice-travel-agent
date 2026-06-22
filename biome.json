@@ -16,6 +16,7 @@
       "!**/.wrangler",
       "!**/dist",
       "!**/build",
+      "!**/migrations",
       "!**/public",
       "!**/*.svg",
       "!**/*.css",

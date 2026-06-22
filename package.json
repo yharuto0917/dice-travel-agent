@@ -2,27 +2,28 @@
   "name": "dice-travel-agent",
   "private": true,
   "version": "1.0.0",
-  "packageManager": "pnpm@11.5.0",
+  "packageManager": "pnpm@11.8.0",
   "description": "",
   "main": "index.js",
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
     "deploy": "turbo run deploy",
-    "lint": "turbo run lint",
-    "format": "turbo run check-types"
+    "typecheck": "turbo run typecheck",
+    "test": "vitest run",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "check": "biome check . && turbo run typecheck && vitest run && turbo run build"
   },
   "author": "yharuto0917",
   "license": "MIT",
-  "devEngines": {
-    "packageManager": {
-      "name": "pnpm",
-      "version": "^11.5.0",
-      "onFail": "download"
-    }
-  },
   "dependencies": {
     "turbo": "^2.9.18",
     "typescript": "^6.0.3"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.0",
+    "vitest": "^4.1.9"
   }
 }

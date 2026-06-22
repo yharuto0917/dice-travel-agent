@@ -27,7 +27,10 @@ const sizeClasses: Record<Size, string> = {
 export function buttonVariants({
   variant = "primary",
   size = "md",
-}: { variant?: Variant; size?: Size } = {}) {
+}: {
+  variant?: Variant;
+  size?: Size;
+} = {}) {
   return cn(base, variantClasses[variant], sizeClasses[size]);
 }
 
@@ -36,14 +39,11 @@ export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   size?: Size;
 };
 
-export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  function Button({ className, variant, size, ...props }, ref) {
-    return (
-      <button
-        ref={ref}
-        className={cn(buttonVariants({ variant, size }), className)}
-        {...props}
-      />
-    );
-  },
-);
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(function Button(
+  { className, variant, size, ...props },
+  ref,
+) {
+  return (
+    <button ref={ref} className={cn(buttonVariants({ variant, size }), className)} {...props} />
+  );
+});

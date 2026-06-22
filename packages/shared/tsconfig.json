@@ -1,8 +1,9 @@
 {
   "extends": "@repo/tsconfig/base.json",
   "compilerOptions": {
-    "types": ["@cloudflare/workers-types"],
-    "noEmit": true
+    "noEmit": true,
+    "lib": ["ES2022"],
+    "types": []
   },
   "include": ["src"]
 }

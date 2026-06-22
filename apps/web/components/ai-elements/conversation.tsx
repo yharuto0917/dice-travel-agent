@@ -1,4 +1,4 @@
-import * as React from "react";
+import type * as React from "react";
 import { cn } from "@/lib/utils";
 
 /** メッセージを縦に積むチャットの器（AI Elements 風の表示専用土台）。 */

@@ -1,8 +1,8 @@
+import { ArrowLeft, ArrowRight, Wrench } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
-import { ArrowRight, ArrowLeft, Wrench } from "@phosphor-icons/react/dist/ssr";
 import { AppShell } from "@/components/layout/app-shell";
-import { Card, CardBody } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
+import { Card, CardBody } from "@/components/ui/card";
 import { FLOW_STEPS } from "@/lib/flow";
 import { cn } from "@/lib/utils";
 
@@ -56,10 +56,7 @@ export function FlowPlaceholder({ index }: { index: number }) {
             <ArrowLeft size={18} weight="bold" />
             {prev ? prev.title : "ホーム"}
           </Link>
-          <Link
-            href={next?.path ?? "/"}
-            className={cn(buttonVariants(), "flex-1")}
-          >
+          <Link href={next?.path ?? "/"} className={cn(buttonVariants(), "flex-1")}>
             {next ? next.title : "ホームへ"}
             <ArrowRight size={18} weight="bold" />
           </Link>

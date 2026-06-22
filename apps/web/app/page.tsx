@@ -1,10 +1,5 @@
+import { ArrowRight, DiceFive, MapPinLine, PaintBrushBroad } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
-import {
-  DiceFive,
-  MapPinLine,
-  ArrowRight,
-  PaintBrushBroad,
-} from "@phosphor-icons/react/dist/ssr";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { FLOW_STEPS } from "@/lib/flow";
@@ -31,8 +26,7 @@ export default function Home() {
           行き先をきめよう。
         </h1>
         <p className="mt-3 text-sm leading-relaxed text-muted">
-          6つの候補からサイコロで行き先を決定。AI Agent
-          があなたの旅のしおりを自動で組み立てます。
+          6つの候補からサイコロで行き先を決定。AI Agent があなたの旅のしおりを自動で組み立てます。
         </p>
       </section>
 
@@ -41,19 +35,14 @@ export default function Home() {
           旅をはじめる
           <ArrowRight size={20} weight="bold" />
         </Link>
-        <Link
-          href="/styleguide"
-          className={buttonVariants({ variant: "outline", size: "lg" })}
-        >
+        <Link href="/styleguide" className={buttonVariants({ variant: "outline", size: "lg" })}>
           <PaintBrushBroad size={20} weight="bold" />
           デザイン土台プレビュー
         </Link>
       </div>
 
       <section className="mt-10">
-        <h2 className="text-xs font-bold uppercase tracking-wide text-muted">
-          旅のながれ
-        </h2>
+        <h2 className="text-xs font-bold uppercase tracking-wide text-muted">旅のながれ</h2>
         <ol className="mt-3 grid gap-2.5">
           {FLOW_STEPS.map((step, i) => {
             const StepIcon = step.icon;
@@ -67,14 +56,10 @@ export default function Home() {
                       </span>
                       <span className="min-w-0">
                         <span className="flex items-center gap-2 text-sm font-bold">
-                          <span className="text-muted">
-                            {String(i + 1).padStart(2, "0")}
-                          </span>
+                          <span className="text-muted">{String(i + 1).padStart(2, "0")}</span>
                           {step.title}
                         </span>
-                        <span className="block truncate text-xs text-muted">
-                          {step.subtitle}
-                        </span>
+                        <span className="block truncate text-xs text-muted">{step.subtitle}</span>
                       </span>
                       <ArrowRight
                         size={18}

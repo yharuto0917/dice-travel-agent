@@ -1,10 +1,10 @@
 import type { Icon } from "@phosphor-icons/react";
 import {
-  MapTrifold,
+  BookOpenText,
   DiceFive,
+  MapTrifold,
   SlidersHorizontal,
   Sparkle,
-  BookOpenText,
 } from "@phosphor-icons/react/dist/ssr";
 
 /** 行き先決定 → 計画 → しおり までの画面フロー定義（ルーティング骨組みの単一の真実）。 */

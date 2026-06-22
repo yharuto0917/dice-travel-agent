@@ -1,36 +1,55 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "dice-travel-agent-api",
-  "main": "src/index.ts",
-  "compatibility_date": "2026-06-19",
-  "compatibility_flags": ["nodejs_compat"],
-  "account_id": "86f364979b0a3494e007b930762245cb",
-  "observability": { "enabled": true },
-  "vars": {
-    "AI_GATEWAY_ACCOUNT_ID": "86f364979b0a3494e007b930762245cb",
-    "AI_GATEWAY_NAME": "dice-travel-agent"
-  },
-  "ai": {
-    "binding": "AI"
-  },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "dice-travel-agent-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
-    }
-  ],
-  "kv_namespaces": [
-    {
-      "binding": "KV",
-      "id": "00000000000000000000000000000000"
-    }
-  ],
-  "r2_buckets": [
-    {
-      "binding": "BUCKET",
-      "bucket_name": "dice-travel-agent-assets"
-    }
-  ]
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "dice-travel-agent-api",
+	"main": "src/index.ts",
+	"compatibility_date": "2026-06-19",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"account_id": "86f364979b0a3494e007b930762245cb",
+	"observability": {
+		"enabled": true
+	},
+	"vars": {
+		"AI_GATEWAY_ACCOUNT_ID": "86f364979b0a3494e007b930762245cb",
+		"AI_GATEWAY_NAME": "dice-travel-agent"
+	},
+	"ai": {
+		"binding": "AI"
+	},
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "dice-travel-agent-db",
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			"migrations_dir": "migrations"
+		},
+		{
+			"binding": "dice_travel_agent_db",
+			"database_name": "dice-travel-agent-db",
+			"database_id": "f915b2cb-c6eb-4936-9841-1118bb4fa4f0",
+			"remote": true
+		}
+	],
+	"kv_namespaces": [
+		{
+			"binding": "KV",
+			"id": "00000000000000000000000000000000"
+		},
+		{
+			"binding": "dice_travel_agent_kv",
+			"id": "aad5263122f14d82a391c87af57c11d3"
+		}
+	],
+	"r2_buckets": [
+		{
+			"binding": "BUCKET",
+			"bucket_name": "dice-travel-agent-assets"
+		},
+		{
+			"bucket_name": "dice-travel-agent-assets",
+			"binding": "dice_travel_agent_assets",
+			"remote": true
+		}
+	]
 }

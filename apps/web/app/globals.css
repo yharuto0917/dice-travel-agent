@@ -4,49 +4,50 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
-  /* surfaces — 温かみのある紙／ジオラマの土台色 */
-  --background: #f7f0e2;
-  --surface: #fffdf7;
-  --surface-2: #f1e7d3;
-  --foreground: #3b322a;
-  --muted: #8d7e6b;
-  --line: #e6d9bf;
+  /* surfaces — ソリッドな紙／ボードの土台色 */
+  --background: #f4f9f9;
+  --surface: #ffffff;
+  --surface-2: #e8f0f2;
+  --ink: #1a2530; /* 真っ黒ではなく深いネイビーでインク感を出す */
+  --muted: #6b7a88;
+  --line: #1a2530; /* ボーダーはインク色でくっきりさせる */
 
-  /* miniature palette — 芝・テラコッタ・空・陽・木 */
-  --primary: #4fa45a;
+  /* miniature palette — マットなパステルカラー */
+  --primary: #7cc1d6;
   --primary-foreground: #ffffff;
-  --accent: #df8a57;
-  --accent-foreground: #ffffff;
-  --sky: #8cc6ea;
-  --sun: #f3c44b;
-  --wood: #a06b46;
-  --ring: #4fa45a;
+  --accent: #f0b86e;
+  --accent-foreground: #1a2530;
+  --sky: #8fcbea;
+  --sun: #f2c75a;
+  --wood: #b07e5b;
+  --ring: #7cc1d6;
 }
 
 .dark {
-  --background: #211c16;
-  --surface: #2b251d;
-  --surface-2: #1a1610;
-  --foreground: #f3ecdd;
-  --muted: #b6a994;
-  --line: #3c3327;
+  --background: #11181f;
+  --surface: #1e2936;
+  --surface-2: #283647;
+  --ink: #f0f6fc;
+  --muted: #8b9aa8;
+  --line: #f0f6fc;
 
-  --primary: #62b56c;
-  --primary-foreground: #13210f;
-  --accent: #e59a6b;
-  --accent-foreground: #221308;
-  --sky: #6fb0d8;
-  --sun: #e9bd49;
-  --wood: #b07c54;
-  --ring: #62b56c;
+  --primary: #5eaac2;
+  --primary-foreground: #11181f;
+  --accent: #e0a355;
+  --accent-foreground: #11181f;
+  --sky: #7ebae0;
+  --sun: #e6b94c;
+  --wood: #a16c49;
+  --ring: #5eaac2;
 }
 
-/* CSS変数 → Tailwindユーティリティ（bg-primary / text-ink など）へ公開 */
+/* CSS変数 → Tailwindユーティリティへ公開 */
 @theme inline {
   --color-background: var(--background);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
-  --color-foreground: var(--foreground);
+  --color-foreground: var(--ink); /* foregroundはinkとして扱う */
+  --color-ink: var(--ink);
   --color-muted: var(--muted);
   --color-line: var(--line);
 
@@ -63,15 +64,15 @@
     "Yu Gothic", ui-rounded, system-ui, sans-serif;
   --font-mono: var(--font-mono-code), ui-monospace, SFMono-Regular, monospace;
 
-  /* おもちゃ／ミニチュアらしい柔らかい立体影 */
-  --shadow-toy: 0 1px 1px rgba(76, 55, 35, 0.04), 0 10px 24px -12px rgba(76, 55, 35, 0.3);
-  --shadow-toy-lg: 0 24px 48px -20px rgba(76, 55, 35, 0.4);
-  --shadow-pip: inset 0 -2px 4px rgba(0, 0, 0, 0.16);
+  /* ぼかしゼロのハードシャドウ（ポップでモダンなNeo-brutalism風） */
+  --shadow-toy: 3px 3px 0px 0px var(--ink);
+  --shadow-toy-lg: 5px 5px 0px 0px var(--ink);
+  --shadow-pip: inset 0 -2px 0px rgba(0, 0, 0, 0.15);
 }
 
 @layer base {
   * {
-    border-color: var(--color-line);
+    border-color: var(--color-ink);
   }
 
   html {
@@ -81,12 +82,9 @@
 
   body {
     background-color: var(--color-background);
-    color: var(--color-foreground);
+    color: var(--color-ink);
     font-family: var(--font-sans);
-    /* ふんわりした被写界深度（tilt-shift）を思わせる光と地の表現 */
-    background-image:
-      radial-gradient(120% 80% at 50% -10%, rgba(255, 255, 255, 0.55), transparent 60%),
-      radial-gradient(100% 60% at 50% 120%, rgba(160, 107, 70, 0.1), transparent 55%);
-    background-attachment: fixed;
+    /* ぼかしやグラデーションを全廃し、ソリッドな背景でモダンなインク感を出す */
+    background-image: none;
   }
 }

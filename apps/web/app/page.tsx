@@ -14,14 +14,14 @@ export default function Home() {
   return (
     <div className="flex min-h-dvh flex-col px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))]">
       <header className="flex items-center gap-2.5">
-        <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-primary text-primary-foreground shadow-toy">
+        <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border-2 border-line bg-primary text-primary-foreground shadow-toy">
           <DiceFive size={22} weight="fill" />
         </span>
         <span className="text-lg font-extrabold tracking-tight">ミニ旅ダイス</span>
       </header>
 
       <section className="mt-10">
-        <p className="inline-flex items-center gap-1.5 rounded-full bg-surface px-3 py-1 text-xs font-bold text-muted shadow-toy">
+        <p className="inline-flex items-center gap-1.5 rounded-full border-2 border-line bg-surface px-3 py-1 text-xs font-bold text-muted shadow-toy">
           <MapPinLine size={14} weight="bold" />
           ミニチュアの日本を旅する
         </p>

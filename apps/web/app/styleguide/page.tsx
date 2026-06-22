@@ -1,18 +1,18 @@
 import {
-  DiceFive,
-  MapTrifold,
   BookOpenText,
-  Sparkle,
   Compass,
-  Mountains,
+  DiceFive,
   ForkKnife,
+  MapTrifold,
+  Mountains,
+  Sparkle,
   SunHorizon,
 } from "@phosphor-icons/react/dist/ssr";
-import { AppShell } from "@/components/layout/app-shell";
-import { Card, CardBody } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Conversation } from "@/components/ai-elements/conversation";
 import { Message, MessageAvatar, MessageContent } from "@/components/ai-elements/message";
+import { AppShell } from "@/components/layout/app-shell";
+import { Button } from "@/components/ui/button";
+import { Card, CardBody } from "@/components/ui/card";
 
 const SWATCHES = [
   { name: "background", cls: "bg-background" },
@@ -122,21 +122,21 @@ export default function StyleguidePage() {
         <Card>
           <CardBody>
             <Conversation>
-              <Message role="assistant">
-                <MessageAvatar role="assistant" />
-                <MessageContent role="assistant">
+              <Message from="assistant">
+                <MessageAvatar from="assistant" />
+                <MessageContent from="assistant">
                   こんにちは！どんな旅にしましょうか？テーマや予算感を教えてください。
                 </MessageContent>
               </Message>
-              <Message role="user">
-                <MessageAvatar role="user" />
-                <MessageContent role="user">
+              <Message from="user">
+                <MessageAvatar from="user" />
+                <MessageContent from="user">
                   温泉とローカルグルメ中心で、1泊2日・予算ひかえめでお願いします。
                 </MessageContent>
               </Message>
-              <Message role="assistant">
-                <MessageAvatar role="assistant" />
-                <MessageContent role="assistant">
+              <Message from="assistant">
+                <MessageAvatar from="assistant" />
+                <MessageContent from="assistant">
                   承知しました。候補地の天気と宿を調べて、しおりを組み立てますね。
                 </MessageContent>
               </Message>

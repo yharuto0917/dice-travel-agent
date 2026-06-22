@@ -1,6 +1,6 @@
-import * as React from "react";
-import Link from "next/link";
 import { CaretLeft } from "@phosphor-icons/react/dist/ssr";
+import Link from "next/link";
+import type * as React from "react";
 
 type AppShellProps = {
   children: React.ReactNode;
@@ -24,9 +24,7 @@ export function AppShell({ children, title, back, trailing }: AppShellProps) {
             <CaretLeft size={20} weight="bold" />
           </Link>
         ) : null}
-        {title ? (
-          <span className="text-base font-extrabold tracking-tight">{title}</span>
-        ) : null}
+        {title ? <span className="text-base font-extrabold tracking-tight">{title}</span> : null}
         {trailing ? <div className="ml-auto">{trailing}</div> : null}
       </header>
 

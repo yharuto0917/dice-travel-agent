@@ -1,11 +1,14 @@
-import * as React from "react";
+import type * as React from "react";
 import { cn } from "@/lib/utils";
 
 /** ミニチュアの立体影をまとった面（カード）。 */
 export function Card({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={cn("rounded-3xl border-2 border-line bg-surface shadow-toy transition-transform", className)}
+      className={cn(
+        "rounded-3xl border-2 border-line bg-surface shadow-toy transition-transform",
+        className,
+      )}
       {...props}
     />
   );

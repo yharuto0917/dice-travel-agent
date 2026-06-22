@@ -1,7 +1,8 @@
 import type { User } from "@repo/shared";
 import { Hono } from "hono";
+import type { Bindings } from "./env";
 
-const app = new Hono();
+const app = new Hono<{ Bindings: Bindings }>();
 
 app.get("/health", (c) => c.json({ ok: true }));
 app.get("/user/:id", (c) => {

@@ -1,5 +1,7 @@
 # Dice Travel Agent
 
+[![CI](https://github.com/yharuto0917/dice-travel-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/yharuto0917/dice-travel-agent/actions/workflows/ci.yml)
+
 ## プロジェクト構成
 
 ```text

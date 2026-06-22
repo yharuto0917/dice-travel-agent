@@ -1,26 +1,92 @@
 @import "tailwindcss";
 
+/* クラスベースのダークモード（.dark を html に付与で切替。基準はライト） */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* surfaces — 温かみのある紙／ジオラマの土台色 */
+  --background: #f7f0e2;
+  --surface: #fffdf7;
+  --surface-2: #f1e7d3;
+  --foreground: #3b322a;
+  --muted: #8d7e6b;
+  --line: #e6d9bf;
+
+  /* miniature palette — 芝・テラコッタ・空・陽・木 */
+  --primary: #4fa45a;
+  --primary-foreground: #ffffff;
+  --accent: #df8a57;
+  --accent-foreground: #ffffff;
+  --sky: #8cc6ea;
+  --sun: #f3c44b;
+  --wood: #a06b46;
+  --ring: #4fa45a;
 }
 
+.dark {
+  --background: #211c16;
+  --surface: #2b251d;
+  --surface-2: #1a1610;
+  --foreground: #f3ecdd;
+  --muted: #b6a994;
+  --line: #3c3327;
+
+  --primary: #62b56c;
+  --primary-foreground: #13210f;
+  --accent: #e59a6b;
+  --accent-foreground: #221308;
+  --sky: #6fb0d8;
+  --sun: #e9bd49;
+  --wood: #b07c54;
+  --ring: #62b56c;
+}
+
+/* CSS変数 → Tailwindユーティリティ（bg-primary / text-ink など）へ公開 */
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-sky: var(--sky);
+  --color-sun: var(--sun);
+  --color-wood: var(--wood);
+  --color-ring: var(--ring);
+
+  --font-sans: var(--font-rounded), "Hiragino Maru Gothic ProN", "BIZ UDPGothic",
+    "Yu Gothic", ui-rounded, system-ui, sans-serif;
+  --font-mono: var(--font-mono-code), ui-monospace, SFMono-Regular, monospace;
+
+  /* おもちゃ／ミニチュアらしい柔らかい立体影 */
+  --shadow-toy: 0 1px 1px rgba(76, 55, 35, 0.04), 0 10px 24px -12px rgba(76, 55, 35, 0.3);
+  --shadow-toy-lg: 0 24px 48px -20px rgba(76, 55, 35, 0.4);
+  --shadow-pip: inset 0 -2px 4px rgba(0, 0, 0, 0.16);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    border-color: var(--color-line);
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    /* ふんわりした被写界深度（tilt-shift）を思わせる光と地の表現 */
+    background-image:
+      radial-gradient(120% 80% at 50% -10%, rgba(255, 255, 255, 0.55), transparent 60%),
+      radial-gradient(100% 60% at 50% 120%, rgba(160, 107, 70, 0.1), transparent 55%);
+    background-attachment: fixed;
+  }
 }

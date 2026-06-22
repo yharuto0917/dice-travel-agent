@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentStateSchema } from "./agent";
+import { ImageRefSchema } from "./common";
 import { TripConditionsSchema } from "./conditions";
 import { DestinationCandidateSchema, DestinationCandidatesSchema } from "./destination";
 import { DiceStateSchema, MAX_REROLLS } from "./dice";
@@ -18,10 +19,20 @@ describe("DestinationCandidateSchema", () => {
     expect(parsed.tags).toEqual([]);
   });
 
-  it("不正な都道府県コードは弾く", () => {
+  it("都道府県コードは 01〜47 のみ受理する", () => {
+    // 有効な境界
     expect(() =>
-      DestinationCandidateSchema.parse({ ...candidate("c1"), prefectureCode: "99" }),
-    ).toThrow();
+      DestinationCandidateSchema.parse({ ...candidate("c1"), prefectureCode: "01" }),
+    ).not.toThrow();
+    expect(() =>
+      DestinationCandidateSchema.parse({ ...candidate("c1"), prefectureCode: "47" }),
+    ).not.toThrow();
+    // 無効（48以降・00・範囲外）
+    for (const code of ["00", "48", "49", "99"]) {
+      expect(() =>
+        DestinationCandidateSchema.parse({ ...candidate("c1"), prefectureCode: code }),
+      ).toThrow();
+    }
   });
 });
 
@@ -30,6 +41,14 @@ describe("DestinationCandidatesSchema", () => {
     const six = Array.from({ length: 6 }, (_, i) => candidate(`c${i}`));
     expect(DestinationCandidatesSchema.parse(six)).toHaveLength(6);
     expect(() => DestinationCandidatesSchema.parse(six.slice(0, 5))).toThrow();
+  });
+});
+
+describe("ImageRefSchema", () => {
+  it("URLを検証し、generated の既定は false", () => {
+    const parsed = ImageRefSchema.parse({ url: "https://example.com/a.png" });
+    expect(parsed.generated).toBe(false);
+    expect(() => ImageRefSchema.parse({ url: "not-a-url" })).toThrow();
   });
 });
 

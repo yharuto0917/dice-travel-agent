@@ -17,8 +17,8 @@ export type Region = z.infer<typeof RegionSchema>;
 /** 行き先候補（地図表示・サイコロの目に対応） */
 export const DestinationCandidateSchema = z.object({
   id: z.string(),
-  /** JIS都道府県コード "01"〜"47" */
-  prefectureCode: z.string().regex(/^(0[1-9]|[1-4][0-9])$/),
+  /** JIS都道府県コード "01"〜"47"（48以降は無効） */
+  prefectureCode: z.string().regex(/^(0[1-9]|[1-3][0-9]|4[0-7])$/),
   prefecture: z.string(),
   /** より細かいエリア名（任意） */
   area: z.string().optional(),

@@ -4,14 +4,8 @@ import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlit
 
 const timestamp = (name: string) => text(name).notNull().default(sql`(CURRENT_TIMESTAMP)`);
 
-/** ユーザー（Firebase Auth の uid で識別） */
-export const users = sqliteTable("users", {
-  id: text("id").primaryKey(), // Firebase uid
-  email: text("email"),
-  displayName: text("display_name"),
-  createdAt: timestamp("created_at"),
-  updatedAt: timestamp("updated_at"),
-});
+// 認証は廃止。ユーザーは署名付き Cookie の匿名クライアントID（client_id）で識別する（#6）。
+// 旧 users テーブルおよび user_id 外部キーは撤廃した。
 
 /**
  * 旅行計画。計画本体は共有スキーマ（TravelPlanDraft/TravelPlan）に整合する
@@ -21,9 +15,7 @@ export const plans = sqliteTable(
   "plans",
   {
     id: text("id").primaryKey(),
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id),
+    clientId: text("client_id").notNull(), // 署名付き Cookie の匿名クライアントID
     status: text("status", { enum: ["draft", "completed"] })
       .notNull()
       .default("draft"),
@@ -35,21 +27,23 @@ export const plans = sqliteTable(
     createdAt: timestamp("created_at"),
     updatedAt: timestamp("updated_at"),
   },
-  (t) => [index("plans_user_id_idx").on(t.userId)],
+  (t) => [index("plans_client_id_idx").on(t.clientId)],
 );
 
-/** レートリミット（ユーザー×日(JST) で 3計画/日 をカウント） */
+/**
+ * レートリミット。クライアント × スコープ × 日(JST) でカウントする（#17）。
+ * scope: "plan"=計画生成（2回/日）, "chat"=常駐チャット（20回/日）。
+ */
 export const rateLimits = sqliteTable(
   "rate_limits",
   {
-    userId: text("user_id")
-      .notNull()
-      .references(() => users.id),
+    clientId: text("client_id").notNull(), // 署名付き Cookie の匿名クライアントID
+    scope: text("scope", { enum: ["plan", "chat"] }).notNull(),
     day: text("day").notNull(), // "YYYY-MM-DD"（JST基準）
     count: integer("count").notNull().default(0),
     updatedAt: timestamp("updated_at"),
   },
-  (t) => [primaryKey({ columns: [t.userId, t.day] })],
+  (t) => [primaryKey({ columns: [t.clientId, t.scope, t.day] })],
 );
 
 /** 常駐チャットのメッセージ履歴（#20） */
@@ -85,7 +79,6 @@ export const images = sqliteTable(
   (t) => [index("images_plan_id_idx").on(t.planId)],
 );
 
-export type UserRow = typeof users.$inferSelect;
 export type PlanRow = typeof plans.$inferSelect;
 export type RateLimitRow = typeof rateLimits.$inferSelect;
 export type ChatMessageRow = typeof chatMessages.$inferSelect;

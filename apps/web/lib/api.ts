@@ -15,15 +15,21 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 /**
  * fetch のラッパー。Cookie を確実に送受信できるよう `credentials: "include"` を強制する。
  * パスは "/me" のように先頭スラッシュ付きで渡す。
+ *
+ * `Content-Type: application/json` は文字列ボディ（JSON 文字列）の時だけ付ける。
+ * - GET 等のボディ無しに付けると CORS の単純リクエスト条件を外し、不要なプリフライトを誘発する。
+ * - FormData / Blob 等はブラウザが boundary 付きで自動設定するため触らない。
+ * - 既に呼び出し側が指定していれば上書きしない。
  */
 export function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  if (typeof init?.body === "string" && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   return fetch(`${API_BASE_URL}${path}`, {
     ...init,
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
+    headers,
   });
 }
 

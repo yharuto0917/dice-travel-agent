@@ -12,6 +12,15 @@
 - 実装: `src/middleware/client-id.ts`。全ルートに適用（`src/index.ts`）。
 - フロントは `credentials: "include"` で送受信する（`apps/web/lib/api.ts`）。
 
+> ⚠️ **デプロイ制約（SameSite=Lax）**: `SameSite=Lax` の Cookie は **同一サイト**
+> （登録可能ドメイン = eTLD+1 が一致）の fetch でしか送出されない（ポート違いは同一サイト扱い）。
+> 識別を成立させるため、**フロントと API は共有親ドメイン配下にデプロイする**こと
+> （例: `app.example.com` と `api.example.com`）。
+> `*.pages.dev` と `*.workers.dev` のように **別サイト**へ分けると、ブラウザの fetch で
+> Cookie が送られず毎回新規クライアント扱いになり、識別・レート制限が機能しない。
+> どうしても別サイト構成が必要な場合は `SameSite=None`（+ `Secure`、CSRF 対策を別途）へ
+> 切り替える。ローカル開発は `localhost:3000` ⇄ `localhost:8787` が同一サイトのため Lax で動く。
+
 ### エンドポイント
 
 | メソッド | パス | 説明 |

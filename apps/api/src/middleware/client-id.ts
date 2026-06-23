@@ -19,6 +19,11 @@ const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
  */
 export const clientId = createMiddleware<AppEnv>(async (c, next) => {
   const secret = c.env.COOKIE_SECRET;
+  // 署名鍵が無いと Cookie の署名・検証が破綻し、毎リクエストで新規IDが発行され識別が成立しない。
+  // 設定漏れ（#23 のシークレット投入忘れ等）を黙って劣化させず、即座に検知して落とす。
+  if (!secret) {
+    throw new Error("COOKIE_SECRET is not configured");
+  }
 
   // getSignedCookie は string（正当）/ false（署名不一致）/ undefined（未設定）を返す。
   const existing = await getSignedCookie(c, secret, CLIENT_ID_COOKIE);

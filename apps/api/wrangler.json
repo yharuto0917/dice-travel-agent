@@ -19,23 +19,13 @@
     {
       "binding": "DB",
       "database_name": "dice-travel-agent-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations"
-    },
-    {
-      "binding": "dice_travel_agent_db",
-      "database_name": "dice-travel-agent-db",
       "database_id": "f915b2cb-c6eb-4936-9841-1118bb4fa4f0",
-      "remote": true
+      "migrations_dir": "migrations"
     }
   ],
   "kv_namespaces": [
     {
       "binding": "KV",
-      "id": "00000000000000000000000000000000"
-    },
-    {
-      "binding": "dice_travel_agent_kv",
       "id": "aad5263122f14d82a391c87af57c11d3"
     }
   ],
@@ -43,11 +33,6 @@
     {
       "binding": "BUCKET",
       "bucket_name": "dice-travel-agent-assets"
-    },
-    {
-      "bucket_name": "dice-travel-agent-assets",
-      "binding": "dice_travel_agent_assets",
-      "remote": true
     }
   ]
 }

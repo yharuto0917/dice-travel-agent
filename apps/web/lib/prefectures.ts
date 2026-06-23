@@ -1,5 +1,3 @@
-import type { MapCandidate } from "./map";
-
 /** 全47都道府県（JISコード id と nam_ja）。public/japan.topojson の properties と一致。 */
 export interface Prefecture {
   id: number;
@@ -57,35 +55,3 @@ export const PREFECTURES: Prefecture[] = [
   { id: 46, name: "鹿児島県", region: "九州・沖縄", areaType: "suburb" },
   { id: 47, name: "沖縄県", region: "九州・沖縄", areaType: "suburb" },
 ];
-
-/** 候補ピン用のマットなパステル6色（ミニチュア・ジオラマ配色）。 */
-export const CANDIDATE_COLORS = [
-  "#7cc1d6", // 水色
-  "#f0b86e", // 琥珀
-  "#d98ca0", // ローズ
-  "#a99cd6", // ラベンダー
-  "#8fbf9f", // セージ
-  "#f2c75a", // 黄
-];
-
-/**
- * 47都道府県から重複なく `count` 件をランダム抽出し、地図表示用の候補に整形する。
- * ユーザーが選ぶのではなく、毎回ランダムに6つの行き先候補を提示するために使う。
- */
-export function pickRandomCandidates(count = 6): MapCandidate[] {
-  const pool = [...PREFECTURES];
-  // 部分フィッシャー–イェーツ: 先頭 count 件だけを正しくシャッフルする
-  for (let i = 0; i < count && i < pool.length; i++) {
-    const j = i + Math.floor(Math.random() * (pool.length - i));
-    const tmp = pool[i];
-    pool[i] = pool[j];
-    pool[j] = tmp;
-  }
-
-  return pool.slice(0, count).map((pref, idx) => ({
-    prefectureId: pref.id,
-    prefectureName: pref.name,
-    color: CANDIDATE_COLORS[idx % CANDIDATE_COLORS.length],
-    label: `候補 ${idx + 1}`,
-  }));
-}

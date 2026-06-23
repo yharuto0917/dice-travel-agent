@@ -22,7 +22,6 @@
     "ai": "^6.0.208",
     "clsx": "^2.1.1",
     "d3-geo": "^3.1.1",
-    "motion": "^12.40.0",
     "next": "16.2.9",
     "open-data-jp-prefectures-geojson": "^1.1.0",
     "react": "19.2.4",

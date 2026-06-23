@@ -2,22 +2,29 @@
   "name": "@repo/api",
   "version": "0.0.0",
   "private": true,
-  "exports":{
+  "exports": {
     ".": "./src/index.ts"
   },
   "scripts": {
     "dev": "wrangler dev --port 8787",
     "deploy": "wrangler deploy",
     "build": "wrangler deploy --dry-run --outdir dist",
-    "check-types": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "cf-typegen": "wrangler types",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate": "wrangler d1 migrations apply DB --remote"
   },
   "type": "module",
   "dependencies": {
     "@repo/shared": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "hono": "^4.12.26"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260621.1",
     "@repo/tsconfig": "workspace:*",
+    "drizzle-kit": "^0.31.10",
     "typescript": "^6.0.3",
     "wrangler": "^4.103.0"
   }

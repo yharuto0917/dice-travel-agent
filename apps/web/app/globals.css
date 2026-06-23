@@ -1,26 +1,90 @@
 @import "tailwindcss";
 
+/* クラスベースのダークモード（.dark を html に付与で切替。基準はライト） */
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* surfaces — ソリッドな紙／ボードの土台色 */
+  --background: #f4f9f9;
+  --surface: #ffffff;
+  --surface-2: #e8f0f2;
+  --ink: #1a2530; /* 真っ黒ではなく深いネイビーでインク感を出す */
+  --muted: #6b7a88;
+  --line: #1a2530; /* ボーダーはインク色でくっきりさせる */
+
+  /* miniature palette — マットなパステルカラー */
+  --primary: #7cc1d6;
+  --primary-foreground: #ffffff;
+  --accent: #f0b86e;
+  --accent-foreground: #1a2530;
+  --sky: #8fcbea;
+  --sun: #f2c75a;
+  --wood: #b07e5b;
+  --ring: #7cc1d6;
 }
 
+.dark {
+  --background: #11181f;
+  --surface: #1e2936;
+  --surface-2: #283647;
+  --ink: #f0f6fc;
+  --muted: #8b9aa8;
+  --line: #f0f6fc;
+
+  --primary: #5eaac2;
+  --primary-foreground: #11181f;
+  --accent: #e0a355;
+  --accent-foreground: #11181f;
+  --sky: #7ebae0;
+  --sun: #e6b94c;
+  --wood: #a16c49;
+  --ring: #5eaac2;
+}
+
+/* CSS変数 → Tailwindユーティリティへ公開 */
 @theme inline {
   --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-foreground: var(--ink); /* foregroundはinkとして扱う */
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-sky: var(--sky);
+  --color-sun: var(--sun);
+  --color-wood: var(--wood);
+  --color-ring: var(--ring);
+
+  --font-sans: var(--font-rounded), "Hiragino Maru Gothic ProN", "BIZ UDPGothic",
+    "Yu Gothic", ui-rounded, system-ui, sans-serif;
+  --font-mono: var(--font-mono-code), ui-monospace, SFMono-Regular, monospace;
+
+  /* ぼかしゼロのハードシャドウ（ポップでモダンなNeo-brutalism風） */
+  --shadow-toy: 3px 3px 0px 0px var(--ink);
+  --shadow-toy-lg: 5px 5px 0px 0px var(--ink);
+  --shadow-pip: inset 0 -2px 0px rgba(0, 0, 0, 0.15);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@layer base {
+  * {
+    border-color: var(--color-ink);
   }
-}
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    /* ぼかしやグラデーションを全廃し、ソリッドな背景でモダンなインク感を出す */
+    background-image: none;
+  }
 }

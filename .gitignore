@@ -18,6 +18,7 @@ build/
 # cloudflare
 .wrangler
 cloudflare-env.d.ts
+worker-configuration.d.ts
 
 # env
 .env*

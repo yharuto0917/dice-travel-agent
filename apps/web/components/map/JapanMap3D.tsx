@@ -1,32 +1,26 @@
 "use client";
 
+import { CircleNotch, HandPointing, Warning } from "@phosphor-icons/react";
 import { OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
-import { Bloom, DepthOfField, EffectComposer } from "@react-three/postprocessing";
 import type React from "react";
 import { useEffect, useState } from "react";
 import * as topojson from "topojson-client";
+import type { MapCandidate } from "@/lib/map";
 import { PrefectureMesh } from "./PrefectureMesh";
 
-export interface MapCandidate {
-  prefectureId: number;
-  prefectureName: string;
-  color: string;
-  label: string;
-}
+export type { MapCandidate };
 
 interface JapanMap3DProps {
   candidates?: MapCandidate[];
   selectedPrefectureId?: number | null;
   onSelectPrefecture?: (prefectureId: number, prefectureName: string) => void;
-  enableEffects?: boolean;
 }
 
 export const JapanMap3D: React.FC<JapanMap3DProps> = ({
   candidates = [],
   selectedPrefectureId = null,
   onSelectPrefecture,
-  enableEffects = true,
 }) => {
   const [mounted, setMounted] = useState(false);
   // biome-ignore lint/suspicious/noExplicitAny: GeoJSON features array is complex
@@ -75,37 +69,19 @@ export const JapanMap3D: React.FC<JapanMap3DProps> = ({
 
   if (!mounted || loading) {
     return (
-      <div className="flex flex-col items-center justify-center w-full h-full bg-slate-50 min-h-[400px]">
-        <div className="relative w-16 h-16 mb-4">
-          <div className="absolute inset-0 rounded-full border-4 border-slate-200 border-t-indigo-600 animate-spin" />
-        </div>
-        <p className="text-sm font-semibold text-slate-500 animate-pulse">
-          3D日本地図を読み込み中...
-        </p>
+      <div className="flex h-full min-h-[360px] w-full flex-col items-center justify-center gap-3 bg-surface-2">
+        <CircleNotch size={40} weight="bold" className="animate-spin text-primary" />
+        <p className="text-sm font-bold text-muted">3D日本地図を読み込み中…</p>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center w-full h-full bg-red-50 text-red-500 p-6 rounded-2xl min-h-[400px]">
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          fill="none"
-          viewBox="0 0 24 24"
-          strokeWidth={1.5}
-          stroke="currentColor"
-          className="w-12 h-12 mb-3"
-        >
-          <title>エラーアイコン</title>
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 7.5h.008v.008H12v-.008Z"
-          />
-        </svg>
-        <p className="font-bold text-lg mb-1">エラーが発生しました</p>
-        <p className="text-sm opacity-90">{error}</p>
+      <div className="flex h-full min-h-[360px] w-full flex-col items-center justify-center gap-2 bg-surface-2 p-6 text-center">
+        <Warning size={40} weight="fill" className="text-accent" />
+        <p className="text-base font-extrabold">読み込みに失敗しました</p>
+        <p className="text-xs text-muted">{error}</p>
       </div>
     );
   }
@@ -117,36 +93,26 @@ export const JapanMap3D: React.FC<JapanMap3DProps> = ({
   }
 
   return (
-    <div className="relative w-full h-full min-h-[400px] bg-slate-50 rounded-3xl overflow-hidden border border-slate-100 shadow-inner">
+    <div className="relative h-full min-h-[360px] w-full overflow-hidden rounded-3xl bg-surface-2">
       <Canvas
-        shadows
+        // 軽量化: 影・ポストプロセスを廃止し、Retina描画は上限1.5に、
+        // 描画は必要時のみ（操作・候補更新時）の frameloop="demand" にする。
+        frameloop="demand"
+        dpr={[1, 1.5]}
         camera={{ position: [0, 8, 9], fov: 40 }}
         gl={{ antialias: true, alpha: false }}
       >
-        <color attach="background" args={["#fafafa"]} />
+        {/* デザイン背景色（--background）に合わせてキャンバスを馴染ませる */}
+        <color attach="background" args={["#f4f9f9"]} />
 
         {/* フォグ効果でミニチュアの奥行き感を演出 */}
-        <fog attach="fog" args={["#fafafa", 10, 25]} />
+        <fog attach="fog" args={["#f4f9f9", 10, 25]} />
 
-        {/* 柔らかい環境光 */}
-        <ambientLight intensity={0.7} />
-
-        {/* メインの平行光源（太陽光、影を作る） */}
-        <directionalLight
-          castShadow
-          position={[8, 12, 5]}
-          intensity={1.2}
-          shadow-mapSize-width={2048}
-          shadow-mapSize-height={2048}
-          shadow-camera-far={30}
-          shadow-camera-left={-6}
-          shadow-camera-right={6}
-          shadow-camera-top={6}
-          shadow-camera-bottom={-6}
-          shadow-bias={-0.0005}
-        />
-
-        {/* 補助光（影の部分を少し明るくしてディテールを残す） */}
+        {/* 影を使わないぶん、全体を均一に照らす環境光を強めに */}
+        <ambientLight intensity={0.9} />
+        {/* メインの平行光源（陰影で立体感を残す。影マップは生成しない） */}
+        <directionalLight position={[8, 12, 5]} intensity={1.0} />
+        {/* 補助光（暗部を少し起こしてディテールを残す） */}
         <directionalLight position={[-8, 8, -5]} intensity={0.4} />
 
         {/* 地図コンポーネント群 */}
@@ -169,9 +135,9 @@ export const JapanMap3D: React.FC<JapanMap3DProps> = ({
           })}
 
           {/* ミニチュアの土台（テーブル） */}
-          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.005, 0]} receiveShadow>
+          <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.005, 0]}>
             <planeGeometry args={[50, 50]} />
-            <meshStandardMaterial color="#f1f5f9" roughness={0.9} metalness={0.05} />
+            <meshStandardMaterial color="#dce8ea" roughness={0.9} metalness={0.05} />
           </mesh>
         </group>
 
@@ -184,23 +150,12 @@ export const JapanMap3D: React.FC<JapanMap3DProps> = ({
           maxPolarAngle={Math.PI / 2.3} // 地面スレスレより少し上で止める
           minPolarAngle={Math.PI / 6} // 真上近くまで
         />
-
-        {/* 被写界深度（tilt-shift）とブルーム効果によるミニチュア風ポストプロセス */}
-        {enableEffects && (
-          <EffectComposer>
-            <DepthOfField
-              focusDistance={0.42} // カメラからの焦点距離（0.0〜1.0）
-              focalLength={0.04} // レンズの焦点距離（大きいほどボケる）
-              bokehScale={3.5} // ボケの強さ
-            />
-            <Bloom luminanceThreshold={0.8} luminanceSmoothing={0.9} height={300} intensity={0.2} />
-          </EffectComposer>
-        )}
       </Canvas>
 
-      {/* 右上の操作ガイド */}
-      <div className="absolute top-4 right-4 bg-white/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-slate-100 text-[10px] font-medium text-slate-500 shadow-sm pointer-events-none select-none">
-        🖱️ ドラッグで回転 / スクロールでズーム
+      {/* 右上の操作ガイド（すりガラスを排し、ソリッド＋ハードシャドウのトイ調に） */}
+      <div className="pointer-events-none absolute right-3 top-3 inline-flex select-none items-center gap-1.5 rounded-full border-2 border-line bg-surface px-2.5 py-1 text-[10px] font-bold text-muted shadow-toy">
+        <HandPointing size={13} weight="bold" />
+        ドラッグで回転 / スクロールでズーム
       </div>
     </div>
   );

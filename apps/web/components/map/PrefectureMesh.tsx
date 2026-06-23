@@ -1,11 +1,9 @@
 "use client";
 
 import { Html } from "@react-three/drei";
-import { useFrame } from "@react-three/fiber";
 import * as d3 from "d3-geo";
 import type React from "react";
-import { useMemo, useRef, useState } from "react";
-import * as THREE from "three";
+import { useMemo } from "react";
 import { geoJsonToShapes, projection } from "@/lib/map";
 
 interface PrefectureMeshProps {
@@ -17,6 +15,9 @@ interface PrefectureMeshProps {
   onSelect?: (prefectureId: number, prefectureName: string) => void;
 }
 
+// 陸地の標準色（土台 #dce8ea より明るくしてジオラマの段差を出す）
+const BASE_COLOR = "#f1f7f8";
+
 export const PrefectureMesh: React.FC<PrefectureMeshProps> = ({
   feature,
   highlighted,
@@ -24,10 +25,6 @@ export const PrefectureMesh: React.FC<PrefectureMeshProps> = ({
   candidateLabel,
   onSelect,
 }) => {
-  const [hovered, setHovered] = useState(false);
-  const groupRef = useRef<THREE.Group>(null);
-  const materialRef = useRef<THREE.MeshStandardMaterial>(null);
-
   const prefectureId = feature.properties.id;
   const prefectureName = feature.properties.nam_ja;
 
@@ -45,46 +42,21 @@ export const PrefectureMesh: React.FC<PrefectureMeshProps> = ({
     }
   }, [feature]);
 
-  // アニメーション用の目標値
-  // ホバーやハイライト時に少し浮き上がらせる（ミニチュア感を強調）
-  const targetY = (hovered ? 0.08 : 0) + (highlighted ? 0.15 : 0);
+  // 候補地は少し高く・厚く押し出して目立たせる（アニメーションはせず静的に配置）
+  const raisedY = highlighted ? 0.15 : 0;
   const depth = highlighted ? 0.25 : 0.15;
+  const color = highlighted ? highlightColor : BASE_COLOR;
 
-  // 押し出し（立体化）の設定
+  // 押し出し（立体化）。軽量化のためベベルを無効化しセグメント数を抑える。
   const extrudeSettings = useMemo(
     () => ({
-      depth: depth,
-      bevelEnabled: true,
-      bevelSegments: 3,
+      depth,
+      bevelEnabled: false,
       steps: 1,
-      bevelSize: 0.015,
-      bevelThickness: 0.015,
-      curveSegments: 6, // パフォーマンス向上のためセグメント数は控えめに
+      curveSegments: 4,
     }),
     [depth],
   );
-
-  // マテリアルの色設定
-  const baseColor = "#e2e8f0"; // slate-200 (標準色)
-  const hoverColor = "#cbd5e1"; // slate-300 (ホバー時)
-  const activeColor = highlighted ? highlightColor : baseColor;
-
-  useFrame((_state, delta) => {
-    if (groupRef.current) {
-      // Y位置（浮き上がり）を滑らかに補間
-      groupRef.current.position.y = THREE.MathUtils.lerp(
-        groupRef.current.position.y,
-        targetY,
-        12 * delta,
-      );
-    }
-
-    if (materialRef.current) {
-      // マテリアルの色を滑らかに補間
-      const targetColor = new THREE.Color(hovered && !highlighted ? hoverColor : activeColor);
-      materialRef.current.color.lerp(targetColor, 12 * delta);
-    }
-  });
 
   // biome-ignore lint/suspicious/noExplicitAny: R3F pointer event type
   const handleClick = (e: any) => {
@@ -93,43 +65,27 @@ export const PrefectureMesh: React.FC<PrefectureMeshProps> = ({
   };
 
   return (
-    <group ref={groupRef}>
+    <group position={[0, raisedY, 0]}>
       {/* biome-ignore lint/a11y/noStaticElementInteractions: R3F groups are 3D meshes, not HTML interactive elements */}
-      <group
-        rotation={[-Math.PI / 2, 0, 0]}
-        onPointerOver={(e) => {
-          e.stopPropagation();
-          setHovered(true);
-        }}
-        onPointerOut={(e) => {
-          e.stopPropagation();
-          setHovered(false);
-        }}
-        onClick={handleClick}
-      >
+      <group rotation={[-Math.PI / 2, 0, 0]} onClick={handleClick}>
         {shapes.map((shape, idx) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: Prefecture shapes are static, order never changes
-          <mesh key={`${prefectureId}-${idx}`} castShadow receiveShadow>
+          <mesh key={`${prefectureId}-${idx}`}>
             <extrudeGeometry args={[shape, extrudeSettings]} />
-            <meshStandardMaterial
-              ref={idx === 0 ? materialRef : undefined}
-              color={activeColor}
-              roughness={0.5}
-              metalness={0.1}
-            />
+            <meshStandardMaterial color={color} roughness={0.6} metalness={0.05} />
           </mesh>
         ))}
 
         {/* 候補地のピン・ラベル表示 */}
         {highlighted && (
           <group position={[centroid[0], centroid[1], depth + 0.1]}>
-            {/* 3Dのピンの足（シリンダー） */}
-            <mesh rotation={[Math.PI / 2, 0, 0]} castShadow>
+            {/* 3Dのピンの足（シリンダー）。デザインのインク色に合わせる */}
+            <mesh rotation={[Math.PI / 2, 0, 0]}>
               <cylinderGeometry args={[0.02, 0.02, 0.2, 8]} />
-              <meshStandardMaterial color="#374151" roughness={0.3} />
+              <meshStandardMaterial color="#1a2530" roughness={0.3} />
             </mesh>
             {/* 3Dのピンの頭（スフィア） */}
-            <mesh position={[0, 0, 0.1]} castShadow>
+            <mesh position={[0, 0, 0.1]}>
               <sphereGeometry args={[0.06, 16, 16]} />
               <meshStandardMaterial color={highlightColor} roughness={0.2} metalness={0.1} />
             </mesh>
@@ -142,15 +98,17 @@ export const PrefectureMesh: React.FC<PrefectureMeshProps> = ({
               className="pointer-events-none select-none"
             >
               <div
-                className="flex flex-col items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold text-white shadow-lg whitespace-nowrap transition-transform duration-200 scale-90 hover:scale-100"
+                className="flex scale-90 flex-col items-center gap-0.5 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-bold text-white"
                 style={{
                   backgroundColor: highlightColor,
-                  border: "2px solid white",
+                  // すりガラス調のソフト影をやめ、インク枠＋ぼかしゼロのハードシャドウへ
+                  border: "2px solid #1a2530",
+                  boxShadow: "2px 2px 0 0 #1a2530",
                   transform: "translateY(-10px)",
                 }}
               >
                 {candidateLabel && (
-                  <span className="opacity-90 text-[10px] leading-none">{candidateLabel}</span>
+                  <span className="text-[10px] leading-none opacity-90">{candidateLabel}</span>
                 )}
                 <span className="leading-none">{prefectureName}</span>
               </div>

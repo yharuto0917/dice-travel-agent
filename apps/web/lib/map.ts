@@ -1,6 +1,17 @@
 import * as d3 from "d3-geo";
 import * as THREE from "three";
 
+/** 地図上に表示する行き先候補（ピン・ラベルの描画に使うビューモデル）。 */
+export interface MapCandidate {
+  /** JIS都道府県コード（1〜47）。topojson の properties.id と一致。 */
+  prefectureId: number;
+  prefectureName: string;
+  /** ピン・ラベルの色 */
+  color: string;
+  /** 「候補 1」などの表示ラベル */
+  label: string;
+}
+
 // 日本の中心付近の座標
 export const MAP_CENTER: [number, number] = [138.5, 36.5];
 // Three.js空間での地図の大きさに合わせたスケール調整

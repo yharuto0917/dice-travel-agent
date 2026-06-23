@@ -257,6 +257,9 @@ importers:
       '@phosphor-icons/react':
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
+      '@react-three/cannon':
+        specifier: ^6.6.0
+        version: 6.6.0(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.184.0))(react@19.2.4)(three@0.184.0)(typescript@5.9.3)
       '@react-three/drei':
         specifier: ^10.7.7
         version: 10.7.7(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.184.0))(@types/react@19.2.17)(@types/three@0.184.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.184.0)
@@ -269,6 +272,9 @@ importers:
       '@repo/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@tanstack/react-query':
+        specifier: ^5.101.0
+        version: 5.101.0(react@19.2.4)
       ai:
         specifier: ^6.0.208
         version: 6.0.208(zod@4.4.3)
@@ -299,6 +305,9 @@ importers:
       topojson-client:
         specifier: ^3.1.0
         version: 3.1.0
+      zustand:
+        specifier: ^5.0.14
+        version: 5.0.14(@types/react@19.2.17)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
     devDependencies:
       '@opennextjs/cloudflare':
         specifier: ^1.19.11
@@ -1512,6 +1521,11 @@ packages:
       react: '>= 16.8'
       react-dom: '>= 16.8'
 
+  '@pmndrs/cannon-worker-api@2.4.0':
+    resolution: {integrity: sha512-oJA1Bboc+WObksRaGDKJG0Wna9Q75xi1MdXVAZ9qXzBOyPsadmAnrmiKOEF0R8v/4zsuJElvscNZmyo3msbZjA==}
+    peerDependencies:
+      three: '>=0.139'
+
   '@poppinss/colors@4.1.6':
     resolution: {integrity: sha512-H9xkIdFswbS8n1d6vmRd8+c10t2Qe+rZITbbDHHkQixH5+2x1FDGmi/0K+WgWiqQFKPSlIYB7jlH6Kpfn6Fleg==}
 
@@ -1520,6 +1534,13 @@ packages:
 
   '@poppinss/exception@1.2.3':
     resolution: {integrity: sha512-dCED+QRChTVatE9ibtoaxc+WkdzOSjYTKi/+uacHWIsfodVfpsueo3+DKpgU5Px8qXjgmXkSvhXvSCz3fnP9lw==}
+
+  '@react-three/cannon@6.6.0':
+    resolution: {integrity: sha512-lP9rJoVHQi0w+dYF8FJAm2xr5eLfNEckb04j72kjqndUkuOPr26N4rSBhQbHl5b5N3tEnhQaIMungAvHkcY8/A==}
+    peerDependencies:
+      '@react-three/fiber': '>=8'
+      react: '>=18'
+      three: '>=0.139'
 
   '@react-three/drei@10.7.7':
     resolution: {integrity: sha512-ff+J5iloR0k4tC++QtD/j9u3w5fzfgFAWDtAGQah9pF2B1YgOq/5JxqY0/aVoQG5r3xSZz0cv5tk2YuBob4xEQ==}
@@ -1912,6 +1933,14 @@ packages:
   '@tailwindcss/postcss@4.3.1':
     resolution: {integrity: sha512-dNJuNbdEJT/SWRuXTYP1WSamelsz3ztkUsdtWQPjrexysrTpaEPM40P/71knXiXLYEojqPOEGitVLLpPMS5T6A==}
 
+  '@tanstack/query-core@5.101.0':
+    resolution: {integrity: sha512-cQetA74EB+seWySv1TTKr828TnP0u39m6LykwDXIo84SNortpDkp30TMEjkqtYCNP9c40uT/iwl6MLiufEt0Ow==}
+
+  '@tanstack/react-query@5.101.0':
+    resolution: {integrity: sha512-rLlJXSpkqfizLWgkR5+eLeIk0MvTx/meEIR7LRjxic+qxiQP8zVjq7BqQkiCMNLQBlLfuOLqqr6KO5GtrDlmSg==}
+    peerDependencies:
+      react: ^18 || ^19
+
   '@tsconfig/node18@1.0.3':
     resolution: {integrity: sha512-RbwvSJQsuN9TB04AQbGULYfOGE/RnSFk/FLQ5b0NmDf5Kx2q/lABZbHQPKCO1vZ6Fiwkplu+yb9pGdLy1iGseQ==}
 
@@ -2199,6 +2228,19 @@ packages:
 
   caniuse-lite@1.0.30001799:
     resolution: {integrity: sha512-hG1bReV+OUU+MOqK4t/ZWI0tZOyz3rqS9XuhOUz1cIcbwBKjOyJEJuw9ER5JuNyqxNk8u/JUVbGibBOL1yrjFw==}
+
+  cannon-es-debugger@1.0.0:
+    resolution: {integrity: sha512-sE9lDOBAYFKlh+0w+cvWKwUhJef8HYnUSVPWPL0jD15MAuVRQKno4QYZSGxgOoJkMR3mQqxL4bxys2b3RSWH8g==}
+    peerDependencies:
+      cannon-es: 0.x
+      three: 0.x
+      typescript: '>=3.8'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
+  cannon-es@0.20.0:
+    resolution: {integrity: sha512-eZhWTZIkFOnMAJOgfXJa9+b3kVlvG+FX4mdkpePev/w/rP5V8NRquGyEozcjPfEoXUlb+p7d9SUcmDSn14prOA==}
 
   chai@6.2.2:
     resolution: {integrity: sha512-NUPRluOfOiTKBKvWPtSD4PhFvWCqOi0BGStNWs57X9js7XGTprSmFoz5F0tWhR4WPjNeR9jXqdC7/UpSJTnlRg==}
@@ -4763,6 +4805,10 @@ snapshots:
       react: 19.2.4
       react-dom: 19.2.4(react@19.2.4)
 
+  '@pmndrs/cannon-worker-api@2.4.0(three@0.184.0)':
+    dependencies:
+      three: 0.184.0
+
   '@poppinss/colors@4.1.6':
     dependencies:
       kleur: 4.1.5
@@ -4774,6 +4820,17 @@ snapshots:
       supports-color: 10.2.2
 
   '@poppinss/exception@1.2.3': {}
+
+  '@react-three/cannon@6.6.0(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.184.0))(react@19.2.4)(three@0.184.0)(typescript@5.9.3)':
+    dependencies:
+      '@pmndrs/cannon-worker-api': 2.4.0(three@0.184.0)
+      '@react-three/fiber': 9.6.1(@types/react@19.2.17)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.184.0)
+      cannon-es: 0.20.0
+      cannon-es-debugger: 1.0.0(cannon-es@0.20.0)(three@0.184.0)(typescript@5.9.3)
+      react: 19.2.4
+      three: 0.184.0
+    transitivePeerDependencies:
+      - typescript
 
   '@react-three/drei@10.7.7(@react-three/fiber@9.6.1(@types/react@19.2.17)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.184.0))(@types/react@19.2.17)(@types/three@0.184.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(three@0.184.0)':
     dependencies:
@@ -5152,6 +5209,13 @@ snapshots:
       postcss: 8.5.15
       tailwindcss: 4.3.1
 
+  '@tanstack/query-core@5.101.0': {}
+
+  '@tanstack/react-query@5.101.0(react@19.2.4)':
+    dependencies:
+      '@tanstack/query-core': 5.101.0
+      react: 19.2.4
+
   '@tsconfig/node18@1.0.3': {}
 
   '@turbo/darwin-64@2.9.18':
@@ -5449,6 +5513,15 @@ snapshots:
       three: 0.184.0
 
   caniuse-lite@1.0.30001799: {}
+
+  cannon-es-debugger@1.0.0(cannon-es@0.20.0)(three@0.184.0)(typescript@5.9.3):
+    dependencies:
+      cannon-es: 0.20.0
+      three: 0.184.0
+    optionalDependencies:
+      typescript: 5.9.3
+
+  cannon-es@0.20.0: {}
 
   chai@6.2.2: {}
 

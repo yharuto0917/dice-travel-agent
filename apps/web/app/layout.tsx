@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Geist_Mono, M_PLUS_Rounded_1c } from "next/font/google";
+import { Providers } from "@/components/providers";
 import "./globals.css";
 
 // ミニチュア基調の丸ゴシック。日本語グリフはシステムの丸ゴシックへフォールバック。
@@ -39,8 +40,10 @@ export default function RootLayout({
   return (
     <html lang="ja" className={`${rounded.variable} ${mono.variable} antialiased`}>
       <body className="bg-background text-foreground">
-        {/* Mobile-first: スマホ幅のアプリフレームを中央寄せ（PCではジオラマ上の端末風） */}
-        <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col">{children}</div>
+        <Providers>
+          {/* Mobile-first: スマホ幅のアプリフレームを中央寄せ（PCではジオラマ上の端末風） */}
+          <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col">{children}</div>
+        </Providers>
       </body>
     </html>
   );

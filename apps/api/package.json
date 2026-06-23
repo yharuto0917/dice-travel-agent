@@ -19,6 +19,7 @@
   "dependencies": {
     "@repo/shared": "workspace:*",
     "drizzle-orm": "^0.45.2",
+    "firebase-auth-cloudflare-workers": "^2.0.6",
     "hono": "^4.12.26"
   },
   "devDependencies": {

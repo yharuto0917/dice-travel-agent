@@ -1,5 +1,6 @@
 import { ArrowRight, DiceFive, MapPinLine, PaintBrushBroad } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
+import { AuthStatus } from "@/components/auth/auth-status";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
 import { FLOW_STEPS } from "@/lib/flow";
@@ -13,6 +14,9 @@ export default function Home() {
           <DiceFive size={22} weight="fill" />
         </span>
         <span className="text-lg font-extrabold tracking-tight">ミニ旅ダイス</span>
+        <div className="ml-auto">
+          <AuthStatus />
+        </div>
       </header>
 
       <section className="mt-10">

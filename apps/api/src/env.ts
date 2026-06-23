@@ -15,4 +15,6 @@ export type Bindings = {
   /** AI Gateway 経由で Gemini を呼ぶためのアカウントID / ゲートウェイ名（#14） */
   AI_GATEWAY_ACCOUNT_ID: string;
   AI_GATEWAY_NAME: string;
+  /** Firebase プロジェクトID（IDトークン検証の aud/iss チェックに使用） */
+  FIREBASE_PROJECT_ID: string;
 };

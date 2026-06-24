@@ -30,6 +30,7 @@ export type Bindings = {
   GOOGLE_MAPS_API_KEY?: string;
   PEXELS_API_KEY?: string;
   ODPT_API_KEY?: string;
+  GEMINI_API_KEY?: string;
 };
 
 /**

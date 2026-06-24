@@ -223,6 +223,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@ai-sdk/google':
+        specifier: ^3.0.83
+        version: 3.0.83(zod@4.4.3)
       '@hono/zod-validator':
         specifier: ^0.8.0
         version: 0.8.0(hono@4.12.26)(zod@4.4.3)
@@ -232,6 +235,9 @@ importers:
       agents:
         specifier: ^0.16.2
         version: 0.16.2(@babel/core@7.29.7)(@babel/runtime@7.29.7)(@cloudflare/workers-types@4.20260621.1)(ai@6.0.208(zod@4.4.3))(react@19.2.4)(rolldown@1.0.3)(vite@8.0.16(@types/node@20.19.43)(esbuild@0.28.1)(jiti@2.7.0)(terser@5.16.9)(tsx@4.22.4)(yaml@2.9.0))(zod@4.4.3)
+      ai:
+        specifier: ^6.0.208
+        version: 6.0.208(zod@4.4.3)
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@cloudflare/workers-types@4.20260621.1)(@opentelemetry/api@1.9.1)(sql.js@1.14.1)
@@ -374,6 +380,12 @@ packages:
 
   '@ai-sdk/gateway@3.0.133':
     resolution: {integrity: sha512-Ebs+7iS9zUgJu5B0RlxM2JmDWzq79Cpd6YdiqcCzB5qFdpfQJPUDiXutqlQP89F2XGjOdDeidulBTXUdXWzOxw==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/google@3.0.83':
+    resolution: {integrity: sha512-Pz7aCX0dy+5x+r4K/37HbLZNaPtPL4q2NduzJW64VffLv5sI9Nb478wAd7PlH2r2asiypJsz/Jerf9draTciUA==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -4173,6 +4185,12 @@ snapshots:
       '@ai-sdk/provider': 3.0.10
       '@ai-sdk/provider-utils': 4.0.30(zod@4.4.3)
       '@vercel/oidc': 3.2.0
+      zod: 4.4.3
+
+  '@ai-sdk/google@3.0.83(zod@4.4.3)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.10
+      '@ai-sdk/provider-utils': 4.0.30(zod@4.4.3)
       zod: 4.4.3
 
   '@ai-sdk/provider-utils@4.0.30(zod@4.4.3)':

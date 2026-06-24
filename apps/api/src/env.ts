@@ -19,6 +19,17 @@ export type Bindings = {
   COOKIE_SECRET: string;
   /** CORS 許可オリジン（フロント本番URL）。未設定時は開発用オリジンのみ許可（#6） */
   WEB_ORIGIN?: string;
+
+  /** 外部APIキー */
+  RAKUTEN_APP_ID?: string;
+  RAKUTEN_ACCESS_KEY?: string;
+  HOTTOPEPPER_KEY?: string;
+  FOURSQUARE_KEY?: string;
+  UNSPLASH_ACCESS_KEY?: string;
+  UNSPLASH_SECRET_KEY?: string;
+  GOOGLE_MAPS_API_KEY?: string;
+  PEXELS_API_KEY?: string;
+  ODPT_API_KEY?: string;
 };
 
 /**

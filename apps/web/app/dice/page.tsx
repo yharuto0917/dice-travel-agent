@@ -2,7 +2,6 @@
 
 import { CheckCircle, HandPointing, Shuffle } from "@phosphor-icons/react";
 import { MAX_REROLLS } from "@repo/shared";
-import { useMutation } from "@tanstack/react-query";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -40,24 +39,10 @@ export default function DicePage() {
     setTriggerCount((c) => c + 1);
   };
 
-  const saveDestinationMutation = useMutation({
-    mutationFn: async (_candidateId: string) => {
-      // TODO: 実際のAPIエンドポイントに置き換える
-      return new Promise((resolve) => setTimeout(() => resolve({ success: true }), 500));
-    },
-    onSuccess: () => {
-      // 次のステップ（旅の条件）へ遷移
-      router.push("/conditions");
-    },
-  });
-
   const handleConfirm = () => {
     confirmDestination();
     if (rolledFace === null) return;
-    const selectedId = candidates[rolledFace - 1]?.id;
-    if (selectedId) {
-      saveDestinationMutation.mutate(selectedId);
-    }
+    router.push("/conditions");
   };
 
   const touchStartY = useRef(0);
@@ -184,7 +169,7 @@ export default function DicePage() {
               <Button
                 className="flex-1"
                 onClick={handleConfirm}
-                disabled={gameState === "rolling" || confirmed || saveDestinationMutation.isPending}
+                disabled={gameState === "rolling" || confirmed}
               >
                 <CheckCircle size={18} weight="bold" />
                 ここに決定

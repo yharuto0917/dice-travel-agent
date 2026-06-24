@@ -1,4 +1,3 @@
-// @ts-nocheck
 import {
   GeoPointSchema,
   ImageResultSchema,
@@ -168,32 +167,36 @@ describe("PoiClient", () => {
     const result = await client.searchNearby(35.65858, 139.74543);
 
     expect(result.length).toBe(1);
-    expect(result[0].id).toBe("google-place-1");
-    expect(result[0].name).toBe("東京タワー");
-    expect(result[0].priceLevel).toBe(0); // FREE -> 0
+    expect(result[0]?.id).toBe("google-place-1");
+    expect(result[0]?.name).toBe("東京タワー");
+    expect(result[0]?.priceLevel).toBe(0); // FREE -> 0
     expect(result[0]?.source).toBe("google");
     expect(PoiSchema.safeParse(result[0]).success).toBe(true);
   });
 
-  it("Google APIキーがなく Foursquare キーがある場合は Foursquare API を呼び出すこと", async () => {
+  it("Google APIキーがなく Foursquare キーがある場合は FSQ OS Places API を呼び出すこと", async () => {
     const mockResponse = {
       results: [
         {
-          fsq_id: "fsq-place-1",
+          fsq_place_id: "fsq-place-1",
           name: "東京タワー",
-          geocodes: {
-            main: { latitude: 35.65858, longitude: 139.74543 },
-          },
+          // FSQ OS Places では緯度経度はトップレベルに返る
+          latitude: 35.65858,
+          longitude: 139.74543,
           location: { formatted_address: "東京都港区芝公園４丁目２-８" },
           rating: 9.0,
           price: 2,
+          website: "https://www.tokyotower.co.jp/",
         },
       ],
     };
 
     globalThis.fetch = vi.fn().mockImplementation(async (url: string, init?: RequestInit) => {
-      expect(url).toContain("api.foursquare.com/v3/places/search");
-      expect((init?.headers as Record<string, string>)?.Authorization).toBe("mock-fsq-key");
+      expect(url).toContain("places-api.foursquare.com/places/search");
+      const headers = init?.headers as Record<string, string>;
+      // 旧 v3 の生キーではなく Bearer 認証 + バージョンヘッダーであることを検証
+      expect(headers?.Authorization).toBe("Bearer mock-fsq-key");
+      expect(headers?.["X-Places-Api-Version"]).toBe("2025-06-17");
       return new Response(JSON.stringify(mockResponse), { status: 200 });
     });
 
@@ -201,9 +204,11 @@ describe("PoiClient", () => {
     const result = await client.searchNearby(35.65858, 139.74543);
 
     expect(result.length).toBe(1);
-    expect(result[0].id).toBe("fsq-place-1");
-    expect(result[0].rating).toBe(4.5); // 9.0 / 2 -> 4.5
-    expect(result[0].priceLevel).toBe(2);
+    expect(result[0]?.id).toBe("fsq-place-1");
+    expect(result[0]?.point.lat).toBe(35.65858);
+    expect(result[0]?.rating).toBe(4.5); // 9.0 / 2 -> 4.5
+    expect(result[0]?.priceLevel).toBe(2);
+    expect(result[0]?.url).toBe("https://www.tokyotower.co.jp/");
     expect(result[0]?.source).toBe("foursquare");
     expect(PoiSchema.safeParse(result[0]).success).toBe(true);
   });
@@ -246,10 +251,10 @@ describe("WeatherClient", () => {
     const result = await client.getForecast(35.681238, 139.767125);
 
     expect(result.length).toBe(2);
-    expect(result[0].condition).toBe("晴れ");
+    expect(result[0]?.condition).toBe("晴れ");
     expect(result[0]?.source).toBe("openmeteo");
-    expect(result[1].condition).toBe("雨");
-    expect(result[1].tempMaxC).toBe(23.0);
+    expect(result[1]?.condition).toBe("雨");
+    expect(result[1]?.tempMaxC).toBe(23.0);
     expect(WeatherDailySchema.safeParse(result[0]).success).toBe(true);
   });
 
@@ -297,10 +302,10 @@ describe("WeatherClient", () => {
     const result = await client.getForecast(35.681238, 139.767125);
 
     expect(result.length).toBe(2);
-    expect(result[0].condition).toBe("晴れ 時々 曇り");
+    expect(result[0]?.condition).toBe("晴れ 時々 曇り");
     expect(result[0]?.source).toBe("jma");
-    expect(result[0].tempMaxC).toBe(28);
-    expect(result[0].tempMinC).toBe(19);
+    expect(result[0]?.tempMaxC).toBe(28);
+    expect(result[0]?.tempMinC).toBe(19);
     expect(WeatherDailySchema.safeParse(result[0]).success).toBe(true);
   });
 });
@@ -348,10 +353,10 @@ describe("LodgingClient", () => {
     const result = await client.searchHotels(35.68, 139.76);
 
     expect(result.length).toBe(1);
-    expect(result[0].id).toBe("12345");
-    expect(result[0].name).toBe("テストホテル東京");
-    expect(result[0].pricePerNight?.amount).toBe(8000);
-    expect(result[0].rating).toBe(4.25);
+    expect(result[0]?.id).toBe("12345");
+    expect(result[0]?.name).toBe("テストホテル東京");
+    expect(result[0]?.pricePerNight?.amount).toBe(8000);
+    expect(result[0]?.rating).toBe(4.25);
     expect(result[0]?.source).toBe("rakuten");
     expect(LodgingSchema.safeParse(result[0]).success).toBe(true);
   });
@@ -406,10 +411,10 @@ describe("RestaurantClient", () => {
     const result = await client.searchRestaurants(35.68, 139.76);
 
     expect(result.length).toBe(1);
-    expect(result[0].id).toBe("J000000001");
-    expect(result[0].name).toBe("和食 テスト居酒屋");
-    expect(result[0].genre).toBe("居酒屋");
-    expect(result[0].budget?.amount).toBe(2500); // B002 -> 2500
+    expect(result[0]?.id).toBe("J000000001");
+    expect(result[0]?.name).toBe("和食 テスト居酒屋");
+    expect(result[0]?.genre).toBe("居酒屋");
+    expect(result[0]?.budget?.amount).toBe(2500); // B002 -> 2500
     expect(result[0]?.source).toBe("hotpepper");
     expect(RestaurantSchema.safeParse(result[0]).success).toBe(true);
   });
@@ -483,11 +488,11 @@ describe("TransitClient", () => {
     );
 
     expect(result.length).toBe(2);
-    expect(result[0].mode).toBe("walk");
-    expect(result[1].mode).toBe("transit");
-    expect(result[1].fromName).toBe("大手町駅");
-    expect(result[1].toName).toBe("神谷町駅");
-    expect(result[1].cost?.amount).toBe(180); // 最初の transit に料金付与
+    expect(result[0]?.mode).toBe("walk");
+    expect(result[1]?.mode).toBe("transit");
+    expect(result[1]?.fromName).toBe("大手町駅");
+    expect(result[1]?.toName).toBe("神谷町駅");
+    expect(result[1]?.cost?.amount).toBe(180); // 最初の transit に料金付与
     expect(result[0]?.source).toBe("google");
     expect(TransportLegSchema.safeParse(result[0]).success).toBe(true);
   });
@@ -497,11 +502,11 @@ describe("TransitClient", () => {
     const result = await client.getDirections(fromPoint, toPoint, "東京駅", "東京タワー", "car");
 
     expect(result.length).toBe(1);
-    expect(result[0].mode).toBe("car");
-    expect(result[0].fromName).toBe("東京駅");
-    expect(result[0].toName).toBe("東京タワー");
-    expect(result[0].distanceKm).toBeGreaterThan(0);
-    expect(result[0].durationMin).toBeGreaterThan(0);
+    expect(result[0]?.mode).toBe("car");
+    expect(result[0]?.fromName).toBe("東京駅");
+    expect(result[0]?.toName).toBe("東京タワー");
+    expect(result[0]?.distanceKm).toBeGreaterThan(0);
+    expect(result[0]?.durationMin).toBeGreaterThan(0);
     expect(result[0]?.source).toBeUndefined(); // APIキーなしでの概算のため
     expect(TransportLegSchema.safeParse(result[0]).success).toBe(true);
   });

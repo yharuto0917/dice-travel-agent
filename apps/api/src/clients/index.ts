@@ -27,7 +27,7 @@ export function createClients(env: Bindings) {
     }),
     poi: new PoiClient({
       googleApiKey: env.GOOGLE_MAPS_API_KEY,
-      foursquareKey: env.FOUTSQUARE_KEY,
+      foursquareKey: env.FOURSQUARE_KEY,
       kv: env.KV,
     }),
     weather: new WeatherClient({
@@ -43,7 +43,6 @@ export function createClients(env: Bindings) {
     }),
     transit: new TransitClient({
       googleApiKey: env.GOOGLE_MAPS_API_KEY,
-      odptApiKey: env.ODPT_API_KEY,
       kv: env.KV,
     }),
     image: new ImageClient({

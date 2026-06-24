@@ -71,34 +71,37 @@ export class ApiClientBase {
     // biome-ignore lint/suspicious/noExplicitAny: schema parser is dynamic across workspace
     schema?: any,
   ): Promise<T> {
-    if (!this.kv) {
-      return fetchFn();
-    }
-
-    try {
-      const cached = await this.kv.get(key);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (schema) {
-          return schema.parse(parsed);
+    // 1. キャッシュ読み込み。読み込み・JSON解析・スキーマ検証のいずれかに失敗しても、
+    //    新規取得へフォールバックできるよう全体を try/catch で囲む。
+    if (this.kv) {
+      try {
+        const cached = await this.kv.get(key);
+        if (cached !== null) {
+          const parsed = JSON.parse(cached);
+          return schema ? schema.parse(parsed) : (parsed as T);
         }
-        return parsed as T;
+      } catch (error) {
+        console.error(`[ApiClientBase] Cache read error for key "${key}":`, error);
+        // 読み込み・検証に失敗した場合は、そのまま新規取得にフォールバックする
       }
-    } catch (error) {
-      console.error(`[ApiClientBase] Cache read error for key "${key}":`, error);
-      // キャッシュ読み込みで失敗した場合は、フォールバックしてそのままフェッチする
     }
 
-    const result = await fetchFn();
+    // 2. 新規取得し、キャッシュへ保存する前にスキーマ検証する。
+    //    これにより初回取得時もDTOへの正規化を保証し、不正なデータをキャッシュに残さない。
+    const fetched = await fetchFn();
+    const result: T = schema ? schema.parse(fetched) : fetched;
 
-    try {
-      // Cloudflare KV の仕様上、expirationTtl は最低60秒である必要があります
-      const actualTtl = Math.max(60, ttlSeconds);
-      await this.kv.put(key, JSON.stringify(result), {
-        expirationTtl: actualTtl,
-      });
-    } catch (error) {
-      console.error(`[ApiClientBase] Cache write error for key "${key}":`, error);
+    // 3. 検証済みのデータのみキャッシュへ保存する。
+    if (this.kv) {
+      try {
+        // Cloudflare KV の仕様上、expirationTtl は最低60秒である必要があります
+        const actualTtl = Math.max(60, ttlSeconds);
+        await this.kv.put(key, JSON.stringify(result), {
+          expirationTtl: actualTtl,
+        });
+      } catch (error) {
+        console.error(`[ApiClientBase] Cache write error for key "${key}":`, error);
+      }
     }
 
     return result;

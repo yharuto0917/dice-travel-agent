@@ -9,12 +9,10 @@ import { ApiClientBase } from "./base";
  */
 export class TransitClient extends ApiClientBase {
   private googleApiKey?: string;
-  private odptApiKey?: string;
 
-  constructor(config: { googleApiKey?: string; odptApiKey?: string; kv?: KVNamespace }) {
+  constructor(config: { googleApiKey?: string; kv?: KVNamespace }) {
     super(config.kv);
     this.googleApiKey = config.googleApiKey;
-    this.odptApiKey = config.odptApiKey;
   }
 
   /**
@@ -129,8 +127,8 @@ export class TransitClient extends ApiClientBase {
           mode: stepMode,
           fromName: stepFrom,
           toName: stepTo,
-          durationMin: Math.max(1, Math.round(step.duration?.value / 60)),
-          distanceKm: parseFloat((step.distance?.value / 1000).toFixed(2)),
+          durationMin: this.secondsToDurationMin(step.duration?.value),
+          distanceKm: this.metersToDistanceKm(step.distance?.value),
           cost,
           source: "google",
         };
@@ -144,8 +142,8 @@ export class TransitClient extends ApiClientBase {
         mode: mode === "other" ? "transit" : mode,
         fromName,
         toName,
-        durationMin: Math.max(1, Math.round(leg.duration?.value / 60)),
-        distanceKm: parseFloat((leg.distance?.value / 1000).toFixed(2)),
+        durationMin: this.secondsToDurationMin(leg.duration?.value),
+        distanceKm: this.metersToDistanceKm(leg.distance?.value),
         cost: totalFare,
         source: "google",
       },
@@ -210,8 +208,9 @@ export class TransitClient extends ApiClientBase {
       durationMin,
       distanceKm: actualDistanceKm,
       cost,
-      // ODPTのキーが設定されている場合は "odpt" とする
-      source: this.odptApiKey ? "odpt" : undefined,
+      // 直線距離からの概算値であり、実APIの裏付けがないため出所(source)は付与しない。
+      // 将来 ODPT 等で実データ取得を実装した際に該当 source を設定する。
+      source: undefined,
     };
 
     return Promise.resolve([leg]);
@@ -232,5 +231,24 @@ export class TransitClient extends ApiClientBase {
         Math.sin(dLng / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
+  }
+
+  /**
+   * Google Directions の秒数を所要時間(分)へ変換する。
+   * 値が欠落・非数値のステップ（運賃のみ等）では NaN を作らず undefined を返し、
+   * TransportLegSchema(durationMin は optional な int) の検証失敗を防ぐ。
+   */
+  private secondsToDurationMin(seconds: unknown): number | undefined {
+    if (typeof seconds !== "number" || !Number.isFinite(seconds)) return undefined;
+    return Math.max(1, Math.round(seconds / 60));
+  }
+
+  /**
+   * Google Directions のメートル値を距離(km)へ変換する。
+   * 値が欠落・非数値の場合は undefined を返す（distanceKm も optional のため）。
+   */
+  private metersToDistanceKm(meters: unknown): number | undefined {
+    if (typeof meters !== "number" || !Number.isFinite(meters)) return undefined;
+    return Number.parseFloat((meters / 1000).toFixed(2));
   }
 }

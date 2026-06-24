@@ -86,17 +86,22 @@ export class ImageClient extends ApiClientBase {
       return [];
     }
 
-    // biome-ignore lint/suspicious/noExplicitAny: photo structure is dynamic
-    return data.results.map((photo: any): ImageResult => {
-      return {
-        url: photo.urls?.regular || photo.urls?.full || "",
-        thumbUrl: photo.urls?.small || photo.urls?.thumb || undefined,
-        alt: photo.description || photo.alt_description || undefined,
-        author: photo.user?.name || "Unsplash Author",
-        authorUrl: photo.user?.links?.html || undefined,
-        source: "unsplash",
-      };
-    });
+    return (
+      data.results
+        // biome-ignore lint/suspicious/noExplicitAny: photo structure is dynamic
+        .map((photo: any): ImageResult => {
+          return {
+            url: photo.urls?.regular || photo.urls?.full || "",
+            thumbUrl: photo.urls?.small || photo.urls?.thumb || undefined,
+            alt: photo.description || photo.alt_description || undefined,
+            author: photo.user?.name || "Unsplash Author",
+            authorUrl: photo.user?.links?.html || undefined,
+            source: "unsplash",
+          };
+        })
+        // URLが取得できなかった画像は DTO(z.url()) に適合しないため除外する
+        .filter((img: ImageResult) => img.url.length > 0)
+    );
   }
 
   /**
@@ -124,16 +129,21 @@ export class ImageClient extends ApiClientBase {
       return [];
     }
 
-    // biome-ignore lint/suspicious/noExplicitAny: photo structure is dynamic
-    return data.photos.map((photo: any): ImageResult => {
-      return {
-        url: photo.src?.large || photo.src?.original || "",
-        thumbUrl: photo.src?.medium || photo.src?.small || undefined,
-        alt: photo.alt || undefined,
-        author: photo.photographer || "Pexels Photographer",
-        authorUrl: photo.photographer_url || undefined,
-        source: "pexels",
-      };
-    });
+    return (
+      data.photos
+        // biome-ignore lint/suspicious/noExplicitAny: photo structure is dynamic
+        .map((photo: any): ImageResult => {
+          return {
+            url: photo.src?.large || photo.src?.original || "",
+            thumbUrl: photo.src?.medium || photo.src?.small || undefined,
+            alt: photo.alt || undefined,
+            author: photo.photographer || "Pexels Photographer",
+            authorUrl: photo.photographer_url || undefined,
+            source: "pexels",
+          };
+        })
+        // URLが取得できなかった画像は DTO(z.url()) に適合しないため除外する
+        .filter((img: ImageResult) => img.url.length > 0)
+    );
   }
 }

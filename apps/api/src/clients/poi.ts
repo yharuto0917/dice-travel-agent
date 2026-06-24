@@ -137,18 +137,22 @@ export class PoiClient extends ApiClientBase {
   }
 
   /**
-   * Foursquare Places API を用いた周辺観光地検索
+   * Foursquare Places API (FSQ OS Places) を用いた周辺観光地検索。
+   * 旧 v3 エンドポイント (api.foursquare.com/v3) は 2026-05-15 に廃止されたため、
+   * 新ホスト places-api.foursquare.com・Bearer 認証・バージョンヘッダーを使用する。
    */
   private async searchWithFoursquare(lat: number, lng: number, radius: number): Promise<Poi[]> {
-    // 観光（Arts and Entertainment: 10000, Landmarks and Outdoors: 16000）
-    const categories = "10000,16000";
-    const url = `https://api.foursquare.com/v3/places/search?ll=${lat},${lng}&radius=${radius}&categories=${categories}&limit=10`;
+    // 取得フィールドを明示（指定しない場合の既定では緯度経度等が返らないことがあるため）
+    const fields = "fsq_place_id,name,latitude,longitude,location,rating,price,website";
+    const url = `https://places-api.foursquare.com/places/search?ll=${lat},${lng}&radius=${radius}&limit=10&sort=POPULARITY&fields=${fields}`;
 
     const response = await this.fetchWithRetry(url, {
       method: "GET",
       headers: {
-        Accept: "application/json",
-        Authorization: this.foursquareKey || "",
+        accept: "application/json",
+        Authorization: `Bearer ${this.foursquareKey || ""}`,
+        // FSQ OS Places は日付形式のバージョン指定ヘッダーが必須
+        "X-Places-Api-Version": "2025-06-17",
       },
     });
 
@@ -164,20 +168,18 @@ export class PoiClient extends ApiClientBase {
 
     // biome-ignore lint/suspicious/noExplicitAny: response structure is dynamic
     return data.results.map((item: any): Poi => {
-      const poiLat = item.geocodes?.main?.latitude ?? lat;
-      const poiLng = item.geocodes?.main?.longitude ?? lng;
-
       return {
-        id: item.fsq_id,
+        id: item.fsq_place_id,
         name: item.name || "不明なスポット",
         point: {
-          lat: poiLat,
-          lng: poiLng,
+          // FSQ OS Places では緯度経度がトップレベルに返る（旧 geocodes.main は廃止）
+          lat: item.latitude ?? lat,
+          lng: item.longitude ?? lng,
         },
-        address: item.location?.formatted_address,
-        rating: item.rating ? item.rating / 2 : undefined, // Foursquare rating は 10点満点のため 5点満点に変換
-        priceLevel: item.price, // Foursquare price は 1〜4
-        url: undefined,
+        address: item.location?.formatted_address ?? item.location?.address,
+        rating: item.rating ? item.rating / 2 : undefined, // FSQ rating は 10点満点のため 5点満点に変換
+        priceLevel: item.price, // FSQ price は 1〜4
+        url: item.website || undefined,
         source: "foursquare",
       };
     });

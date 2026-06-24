@@ -24,7 +24,7 @@ export type Bindings = {
   RAKUTEN_APP_ID?: string;
   RAKUTEN_ACCESS_KEY?: string;
   HOTTOPEPPER_KEY?: string;
-  FOUTSQUARE_KEY?: string;
+  FOURSQUARE_KEY?: string;
   UNSPLASH_ACCESS_KEY?: string;
   UNSPLASH_SECRET_KEY?: string;
   GOOGLE_MAPS_API_KEY?: string;

@@ -91,3 +91,13 @@ export const TransportLegSchema = z.object({
   source: ApiSourceSchema.optional(),
 });
 export type TransportLeg = z.infer<typeof TransportLegSchema>;
+
+import { TripConditionsSchema } from "./conditions";
+
+/** 計画作成リクエスト */
+export const CreatePlanRequestSchema = z.object({
+  destinationPrefCode: z.string(),
+  destinationPref: z.string(),
+  conditions: TripConditionsSchema,
+});
+export type CreatePlanRequest = z.infer<typeof CreatePlanRequestSchema>;

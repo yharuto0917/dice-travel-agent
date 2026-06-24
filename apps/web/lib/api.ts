@@ -46,3 +46,13 @@ export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
 export function fetchClientId(): Promise<{ clientId: string }> {
   return apiJson<{ clientId: string }>("/me");
 }
+
+import type { CreatePlanRequest } from "@repo/shared";
+
+/** 旅の条件と行き先を元に新しい計画を作成する */
+export function createPlan(data: CreatePlanRequest): Promise<{ id: string }> {
+  return apiJson<{ id: string }>("/plans", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+}

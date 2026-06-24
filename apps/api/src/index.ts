@@ -1,8 +1,12 @@
+import { routeAgentRequest } from "agents";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import type { AppEnv } from "./env";
+import type { AppEnv, Bindings } from "./env";
 import { clientId } from "./middleware/client-id";
 import plansRoute from "./routes/plans";
+
+// Durable Object クラスを Worker のエントリから re-export する（wrangler が DO として登録）。
+export { TravelPlanningAgent } from "./agents/travel-planning-agent";
 
 /** 開発時に許可するフロントのオリジン（本番は WEB_ORIGIN で指定）。 */
 const DEV_ORIGINS = [
@@ -41,4 +45,17 @@ app.get("/health", (c) => c.json({ ok: true }));
 app.get("/me", (c) => c.json({ clientId: c.get("clientId") }));
 
 export type AppType = typeof app;
-export default app;
+
+/**
+ * Worker エントリ。`/agents/*` は Agents SDK のルーティングへ、それ以外は
+ * 既存の Hono アプリ（CORS・clientId ミドルウェア込み）へフォールバックする。
+ *
+ * クライアントは `/agents/travel-planning-agent/{planId}` に WebSocket 接続し、
+ * `setState` でブロードキャストされる AgentState を購読する。
+ * 認証/レート制限・本番CORS厳格化は #17 / #23 で対応する。
+ */
+export default {
+  async fetch(request: Request, env: Bindings, ctx: ExecutionContext): Promise<Response> {
+    return (await routeAgentRequest(request, env, { cors: true })) ?? app.fetch(request, env, ctx);
+  },
+} satisfies ExportedHandler<Bindings>;

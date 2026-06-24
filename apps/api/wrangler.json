@@ -15,6 +15,10 @@
   "ai": {
     "binding": "AI"
   },
+  "durable_objects": {
+    "bindings": [{ "name": "TravelPlanningAgent", "class_name": "TravelPlanningAgent" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TravelPlanningAgent"] }],
   "d1_databases": [
     {
       "binding": "DB",

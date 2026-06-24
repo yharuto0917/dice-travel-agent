@@ -2,6 +2,10 @@ packages:
   - "apps/*"
   - "packages/*"
 allowBuilds:
+  # agents パッケージ経由の任意ネイティブ依存。Workers ランタイムでは未使用のためビルド不要。
+  '@mongodb-js/zstd': false
+  core-js-pure: false
+  node-liblzma: false
   esbuild: false
   sharp: false
   workerd: false

@@ -78,4 +78,21 @@ describe("PLAN_PIPELINE", () => {
     const draft = runPipeline({ conditions: conditions(1) });
     expect(TravelPlanDraftSchema.safeParse(draft).success).toBe(true);
   });
+
+  it("各ステップを二重適用してもアイテムが重複しない（スケジュールのリトライ冪等性）", () => {
+    const ctx: FillContext = { conditions: conditions(1), destinationName: "京都府" };
+    // 各ステップを連続2回 fill する＝失敗後の再実行（リトライ）を模す。
+    let draft = {};
+    for (const step of PLAN_PIPELINE) {
+      draft = step.fill(draft, ctx);
+      draft = step.fill(draft, ctx);
+    }
+    const parsed = TravelPlanDraftSchema.parse(draft);
+    const itemsOf = (type: string) =>
+      parsed.days?.flatMap((d) => d.items).filter((i) => i.type === type) ?? [];
+    expect(itemsOf("lodging")).toHaveLength(1); // nights=1 → 初日のみ・重複なし
+    expect(itemsOf("meal")).toHaveLength(2); // 全日・重複なし
+    expect(itemsOf("transport")).toHaveLength(1); // 初日のみ・重複なし
+    expect(itemsOf("free")).toHaveLength(2); // designing は上書きなので各日1件
+  });
 });

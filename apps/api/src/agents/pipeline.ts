@@ -3,6 +3,7 @@ import type {
   BudgetBreakdown,
   Money,
   PlanDay,
+  PlanItem,
   TravelPlanDraft,
   TripConditions,
 } from "@repo/shared";
@@ -53,6 +54,14 @@ const destOf = (ctx: FillContext): string => ctx.destinationName?.trim() || "目
 /** 0..nights を「日数」(nights+1) に変換。日帰り(0泊)は1日。 */
 const dayCountOf = (ctx: FillContext): number => nightsOf(ctx) + 1;
 
+/**
+ * 同一 id のアイテムが既に存在しなければ末尾に追加する（無ければそのまま返す）。
+ * `fill` を冪等に保ち、スケジュールのリトライでステップが再実行されても
+ * アイテムが二重に積まれないようにするためのヘルパー。
+ */
+const appendItem = (day: PlanDay, item: PlanItem): PlanDay =>
+  day.items.some((i) => i.id === item.id) ? day : { ...day, items: [...day.items, item] };
+
 export const PLAN_PIPELINE: PipelineStep[] = [
   // 0. 行き先・条件の理解：タイトル/サマリーの骨子を置く
   {
@@ -99,18 +108,12 @@ export const PLAN_PIPELINE: PipelineStep[] = [
       const nights = nightsOf(ctx);
       const days = (prev.days ?? []).map((day) =>
         day.dayNumber <= nights
-          ? {
-              ...day,
-              items: [
-                ...day.items,
-                {
-                  id: `d${day.dayNumber}-lodging`,
-                  type: "lodging" as const,
-                  title: "宿泊（未定）",
-                  description: "宿の候補は情報収集ステップ（#14）で実データに置き換えます。",
-                },
-              ],
-            }
+          ? appendItem(day, {
+              id: `d${day.dayNumber}-lodging`,
+              type: "lodging",
+              title: "宿泊（未定）",
+              description: "宿の候補は情報収集ステップ（#14）で実データに置き換えます。",
+            })
           : day,
       );
       return { ...prev, days };
@@ -122,13 +125,9 @@ export const PLAN_PIPELINE: PipelineStep[] = [
     phase: "food",
     section: "food",
     fill: (prev) => {
-      const days = (prev.days ?? []).map((day) => ({
-        ...day,
-        items: [
-          ...day.items,
-          { id: `d${day.dayNumber}-meal`, type: "meal" as const, title: "昼食（未定）" },
-        ],
-      }));
+      const days = (prev.days ?? []).map((day) =>
+        appendItem(day, { id: `d${day.dayNumber}-meal`, type: "meal", title: "昼食（未定）" }),
+      );
       return { ...prev, days };
     },
   },
@@ -140,17 +139,11 @@ export const PLAN_PIPELINE: PipelineStep[] = [
     fill: (prev) => {
       const days = (prev.days ?? []).map((day) =>
         day.dayNumber === 1
-          ? {
-              ...day,
-              items: [
-                ...day.items,
-                {
-                  id: `d${day.dayNumber}-transport`,
-                  type: "transport" as const,
-                  title: "移動（未定）",
-                },
-              ],
-            }
+          ? appendItem(day, {
+              id: `d${day.dayNumber}-transport`,
+              type: "transport",
+              title: "移動（未定）",
+            })
           : day,
       );
       return { ...prev, days };

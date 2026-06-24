@@ -2,7 +2,7 @@ import { type AgentState, AgentStateSchema, type HitlQuestion } from "@repo/shar
 import { Agent, callable } from "agents";
 import { eq } from "drizzle-orm";
 import { getDb } from "../db/client";
-import { plans } from "../db/schema";
+import { type PlanRow, plans } from "../db/schema";
 import type { Bindings } from "../env";
 import { PLAN_PIPELINE } from "./pipeline";
 
@@ -112,10 +112,22 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
     this.setState({ ...this.state, phase: "error", error: String(error) });
   }
 
-  /** planId（= インスタンス名）で D1 の plan 行を読む。 */
-  private async loadPlanRow() {
+  /**
+   * plan 行のメモリキャッシュ。生成中の条件・行き先は不変なので、各ステップで
+   * D1 を読み直さず再利用する。未取得は undefined、取得済みで該当なしは null。
+   * DO が退避するとメモリは失われ、次回 loadPlanRow で再取得される。
+   */
+  private cachedRow: PlanRow | null | undefined;
+
+  /**
+   * planId（= インスタンス名）で D1 の plan 行を読む。
+   * 一度読んだ行は cachedRow に保持し、全ステップで使い回す（同一行の再クエリを避ける）。
+   */
+  private async loadPlanRow(): Promise<PlanRow | null> {
+    if (this.cachedRow !== undefined) return this.cachedRow;
     const db = getDb(this.env);
     const [row] = await db.select().from(plans).where(eq(plans.id, this.name));
-    return row;
+    this.cachedRow = row ?? null;
+    return this.cachedRow;
   }
 }

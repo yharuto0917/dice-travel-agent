@@ -9,7 +9,13 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
-import { AGENT_HOST, PHASE_LABELS, PLAN_ITEM_LABELS, TRAVEL_AGENT_NAME } from "@/lib/agent";
+import {
+  AGENT_HOST,
+  PHASE_LABELS,
+  PLAN_ITEM_LABELS,
+  SECTION_LABELS,
+  TRAVEL_AGENT_NAME,
+} from "@/lib/agent";
 import { FLOW_STEPS } from "@/lib/flow";
 import { cn } from "@/lib/utils";
 
@@ -116,7 +122,7 @@ function GeneratingInner({ planId }: { planId: string }) {
                     className="inline-flex items-center gap-1 rounded-full bg-primary/15 px-2.5 py-1 text-[0.7rem] font-bold text-primary"
                   >
                     <CheckCircle size={12} weight="fill" />
-                    {s}
+                    {SECTION_LABELS[s] ?? s}
                   </span>
                 ))}
               </div>

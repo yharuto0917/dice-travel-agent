@@ -32,6 +32,22 @@ export const PHASE_LABELS: Record<AgentPhase, string> = {
   error: "エラーが発生しました",
 };
 
+/**
+ * 充填済みセクション名（AgentState.filledSections）の日本語ラベル。
+ * 値は `apps/api` の PLAN_PIPELINE の `section` と対応する。未知のキーは
+ * そのまま表示するフォールバック前提。
+ */
+export const SECTION_LABELS: Record<string, string> = {
+  conditions: "条件",
+  research: "情報収集",
+  days: "日程",
+  lodging: "宿泊",
+  food: "食事",
+  transport: "移動",
+  budget: "予算",
+  summary: "仕上げ",
+};
+
 /** 旅程アイテム種別の日本語ラベル。 */
 export const PLAN_ITEM_LABELS: Record<PlanItemType, string> = {
   spot: "観光",

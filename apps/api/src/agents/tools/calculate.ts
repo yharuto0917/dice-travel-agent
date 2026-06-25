@@ -20,15 +20,20 @@ export function buildCalculate(ctx: ToolContext) {
             return { error: "budgetSplit requires total and divisor (not zero)" };
           return { result: (values[0] || 0) / values[1] };
         case "distanceKm": {
-          // Not mathematically precise, just an approximation if needed, or error out
+          // Haversine 近似。lat1,lng1,lat2,lng2 の 4 値が有限数であることを要求する
+          // （`== null` だけだと NaN がすり抜け、NaN 距離が下流に伝播してしまう）。
           if (
             values.length < 4 ||
             values[0] == null ||
             values[1] == null ||
             values[2] == null ||
-            values[3] == null
+            values[3] == null ||
+            !Number.isFinite(values[0]) ||
+            !Number.isFinite(values[1]) ||
+            !Number.isFinite(values[2]) ||
+            !Number.isFinite(values[3])
           ) {
-            return { error: "distanceKm requires lat1, lng1, lat2, lng2" };
+            return { error: "distanceKm requires finite lat1, lng1, lat2, lng2" };
           }
           const lat1 = values[0],
             lng1 = values[1],

@@ -1,12 +1,13 @@
 import type { PlanDay, TravelPlanDraft } from "@repo/shared";
 import { PlanDaySchema } from "@repo/shared";
-import { generateObject, generateText, tool } from "ai";
+import { generateObject, generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import type { Bindings } from "../../env";
 import { createLlm } from "../llm/provider";
 import { buildSubagents } from "../subagents";
 import { buildTools } from "../tools";
 import type { ToolContext } from "../tools/context";
+import { MAX_STEPS, shouldStopUsageLimit } from "./judgement";
 import { DAY_PLANNER_SYSTEM, dayPlannerPrompt } from "./prompts";
 
 export async function runDay(
@@ -29,36 +30,42 @@ export async function runDay(
   });
 
   const allTools = {
-    ...buildTools(env, ctx),
+    ...buildTools(ctx),
     ...buildSubagents(env, ctx),
     finalizeDay,
   };
 
+  // マルチステップのツール呼び出しループを有効化する。AI SDK v6 の generateText は
+  // stopWhen を省略すると stepCountIs(1) で 1 ステップ停止し、ツール結果がモデルに
+  // 再投入されない（=ツールが事実上使われない）。ステップ数上限に加え、
+  // ツール/サブエージェントの使用量上限でも停止させ、コスト暴走を防ぐ。
   const { text } = await generateText({
     model: createLlm(env),
     system: DAY_PLANNER_SYSTEM,
     prompt: dayPlannerPrompt(plan, n, ctx),
     tools: allTools,
-    onStepFinish: () => {
-      // Optional logging per step
-    },
-    // AI SDK doesn't natively expose `stopWhen` in this format but we can abort or check conditions.
-    // However, we rely on the agent calling `finalizeDay` to effectively stop (we can just stop when finalizedDay is set).
-    // In actual implementation, `ai` v3's `maxSteps` handles loop, and we can't easily break early without returning from the tool in a way that stops.
-    // Actually, `generateText` stops automatically if the model doesn't call any more tools.
+    stopWhen: [stepCountIs(MAX_STEPS), () => shouldStopUsageLimit(ctx.usage)],
   });
 
-  if (finalizedDay) {
-    return finalizedDay;
+  // finalizeDay 経由で確定した場合も dayNumber は要求された n に固定する。
+  // モデルが別の番号を入れると mergeDay が誤った日を上書きしてしまうため。
+  // finalizedDay はクロージャ内でのみ代入されるため TS は初期値 null から型を
+  // 広げられない。キャストで宣言型に戻してから truthiness で絞り込む。
+  const finalized = finalizedDay as PlanDay | null;
+  if (finalized) {
+    return { ...finalized, dayNumber: n };
   }
 
-  // Fallback: If it didn't call finalizeDay, try to extract a PlanDay from the last state
+  // フォールバック: finalizeDay が呼ばれなかった場合、計画担当が生成したテキストから
+  // PlanDay を構造抽出する。会話履歴は参照できないため text のみを根拠にし、
+  // dayNumber は n を強制する。
   const { object } = await generateObject({
     model: createLlm(env),
     schema: PlanDaySchema,
-    system: "Extract the PlanDay from the conversation history or text.",
-    prompt: `Text:\n${text}`,
+    system:
+      "Extract a structured PlanDay for the requested day from the planner's notes. If details are missing, produce a minimal but schema-valid day rather than inventing facts.",
+    prompt: `Day number: ${n}\nPlanner notes:\n${text || "(no notes were produced)"}`,
   });
 
-  return object;
+  return { ...object, dayNumber: n };
 }

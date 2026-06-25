@@ -17,9 +17,13 @@ export function dayPlannerPrompt(
   ctx: ToolContext,
 ): string {
   return `Plan Day ${dayNumber} of ${plan.nights !== undefined ? plan.nights + 1 : "?"} days.
-Destination: ${plan.destination || "Unknown"}
 Title: ${plan.title || ""}
 Summary: ${plan.summary || ""}
+Destination coordinates: ${
+    ctx.destPoint
+      ? `${ctx.destPoint.lat}, ${ctx.destPoint.lng}`
+      : "Unknown (use googleMaps to geocode if needed)"
+  }
 
 Conditions:
 ${JSON.stringify(ctx.conditions, null, 2)}

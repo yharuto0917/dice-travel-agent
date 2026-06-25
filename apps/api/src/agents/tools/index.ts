@@ -1,4 +1,3 @@
-import type { Bindings } from "../../env";
 import { buildCalculate } from "./calculate";
 import type { ToolContext } from "./context";
 import { buildGoogleMaps } from "./google-maps";
@@ -9,8 +8,8 @@ import { buildTouristSpotSearch } from "./tourist-spot-search";
 import { buildTransportationSearch } from "./transportation-search";
 import { buildWeatherSearch } from "./weather-search";
 
-export function buildTools(_env: Bindings, ctx: ToolContext) {
-  // context is already populated with clients, usage, etc.
+export function buildTools(ctx: ToolContext) {
+  // ctx は clients / usage 等を保持済み（env は不要）。
   return {
     touristSpotSearch: buildTouristSpotSearch(ctx),
     hotelSearch: buildHotelSearch(ctx),

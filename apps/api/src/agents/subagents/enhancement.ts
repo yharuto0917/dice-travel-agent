@@ -1,6 +1,7 @@
-import { generateText, tool } from "ai";
+import { generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import type { Bindings } from "../../env";
+import { SUBAGENT_MAX_STEPS } from "../flow/judgement";
 import { createLlm } from "../llm/provider";
 import type { ToolContext } from "../tools/context";
 import { buildImageSearch } from "../tools/image-search";
@@ -30,6 +31,7 @@ export function buildEnhancementSubagent(env: Bindings, ctx: ToolContext) {
         tools: {
           imageSearch: buildImageSearch(ctx),
         },
+        stopWhen: stepCountIs(SUBAGENT_MAX_STEPS),
       });
 
       return { enhancedText: text };

@@ -1,4 +1,4 @@
-import { type AgentState, AgentStateSchema, type HitlQuestion } from "@repo/shared";
+import { type AgentState, AgentStateSchema, type GeoPoint, type HitlQuestion } from "@repo/shared";
 import { Agent, callable } from "agents";
 import { eq } from "drizzle-orm";
 import { createClients } from "../clients";
@@ -6,7 +6,7 @@ import { getDb } from "../db/client";
 import { type PlanRow, plans } from "../db/schema";
 import type { Bindings } from "../env";
 import { createUsageCounter } from "./flow/judgement";
-import { mergeDay } from "./flow/merge";
+import { dayCountOf, mergeDay, nightsOf } from "./flow/merge";
 import { runDay } from "./flow/orchestrator";
 import { buildStepPlan } from "./flow/step-plan";
 import { hasLlm } from "./llm/provider";
@@ -42,6 +42,14 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
   async runStep(payload: { index: number }): Promise<void> {
     const { index } = payload;
     const row = await this.loadPlanRow();
+
+    // DO 退避後に行が削除されているとスケジュール実行から runStep が直接呼ばれうる。
+    // start() と同じ「plan not found」不変条件をここでも保証し、欠損行から
+    // 汎用ダミー計画を完成扱いにしてしまうのを防ぐ。
+    if (!row) {
+      this.setState({ ...this.state, phase: "error", error: "plan not found" });
+      return;
+    }
 
     if (!hasLlm(this.env)) {
       // Fallback to existing PLAN_PIPELINE
@@ -87,18 +95,13 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
     let plan = this.state.plan || {};
 
     if (step.type === "setup") {
-      let _destPoint = null;
-      if (row?.destinationPref) {
-        _destPoint = await clients.geocoding.geocode(row.destinationPref);
-      }
-
-      const nights = row?.conditions?.nights ?? 1;
-      const dayCount = nights + 1;
+      const nights = nightsOf(row.conditions?.nights);
+      const dayCount = dayCountOf(nights);
 
       plan = {
         ...plan,
         status: "draft",
-        title: `${row?.destinationPref || "目的地"}の旅`,
+        title: `${row.destinationPref || "目的地"}の旅`,
         summary: `AIが作成した${nights === 0 ? "日帰り" : `${nights}泊${dayCount}日`}のプランです。`,
         nights,
         days: Array.from({ length: dayCount }, (_, i) => ({
@@ -106,7 +109,6 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
           title: `${i + 1}日目`,
           items: [],
         })),
-        destination: undefined,
       };
 
       this.setState({
@@ -119,15 +121,13 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
     } else if (step.type === "planDay") {
       const n = step.dayNumber;
 
-      let destPoint = null;
-      if (row?.destinationPref) {
-        destPoint = await clients.geocoding.geocode(row.destinationPref);
-      }
+      // 行き先のジオコーディングは全日で不変なので一度だけ実行してキャッシュする。
+      const destPoint = await this.loadDestPoint(clients, row.destinationPref);
 
       const ctx = {
         clients,
         destPoint,
-        conditions: row?.conditions || {},
+        conditions: row.conditions || {},
         usage: createUsageCounter(),
       };
 
@@ -188,5 +188,19 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
     const [row] = await db.select().from(plans).where(eq(plans.id, this.name));
     this.cachedRow = row ?? null;
     return this.cachedRow;
+  }
+
+  /** 行き先のジオコーディング結果のメモリキャッシュ。全日で不変なため一度だけ問い合わせる。 */
+  private cachedDestPoint: GeoPoint | null | undefined;
+
+  private async loadDestPoint(
+    clients: ReturnType<typeof createClients>,
+    destinationPref: string | null | undefined,
+  ): Promise<GeoPoint | null> {
+    if (this.cachedDestPoint !== undefined) return this.cachedDestPoint;
+    this.cachedDestPoint = destinationPref
+      ? await clients.geocoding.geocode(destinationPref)
+      : null;
+    return this.cachedDestPoint;
   }
 }

@@ -1,4 +1,5 @@
 import { generateText, stepCountIs, tool } from "ai";
+import { google, GoogleEmbeddingModelOptions } from "@ai-sdk/google";
 import { z } from "zod";
 import type { Bindings } from "../../env";
 import { SUBAGENT_MAX_STEPS } from "../flow/judgement";
@@ -24,7 +25,16 @@ export function buildResearchSubagent(env: Bindings, ctx: ToolContext) {
         system:
           "You are a research subagent for a travel planning system. Gather information using the provided tools and output a clear summary of your findings and candidate locations.",
         prompt: `Topic: ${topic}\nAround: ${around || "Not specified"}`,
+        providerOptions: {
+          google: {
+            thinkingConfig: {
+              thinkingLevel: "high",
+              includeThoughts: true,
+            },
+          },
+        },
         tools: {
+          google_search: google.tools.googleSearch({}),
           touristSpotSearch: buildTouristSpotSearch(ctx),
           restaurantSearch: buildRestaurantSearch(ctx),
           weather: buildWeatherSearch(ctx),

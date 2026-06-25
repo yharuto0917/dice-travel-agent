@@ -1,4 +1,5 @@
 import { generateText, stepCountIs, tool } from "ai";
+import { google, GoogleGenerativeAIProviderOptions } from "@ai-sdk/google";
 import { z } from "zod";
 import type { Bindings } from "../../env";
 import { SUBAGENT_MAX_STEPS } from "../flow/judgement";
@@ -28,7 +29,16 @@ export function buildEnhancementSubagent(env: Bindings, ctx: ToolContext) {
         system:
           "You are an enhancement subagent. Improve the descriptions and titles of the given travel items to make them more attractive. You can also search for images if needed. Output the enhanced items in a structured format.",
         prompt: `Items to enhance: ${JSON.stringify(items, null, 2)}`,
+        providerOptions: {
+          google: {
+            thinkingConfig: {
+              thinkingLevel: "high",
+              includeThoughts: true,
+            },
+          },
+        },
         tools: {
+          google_search: google.tools.googleSearch({}),
           imageSearch: buildImageSearch(ctx),
         },
         stopWhen: stepCountIs(SUBAGENT_MAX_STEPS),

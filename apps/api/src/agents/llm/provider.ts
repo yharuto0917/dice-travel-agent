@@ -1,7 +1,7 @@
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { Bindings } from "../../env";
 
-export const GEMINI_MODEL_ID = "gemini-2.5-flash";
+export const GEMINI_MODEL_ID = "gemini-3.5-flash";
 
 export function createLlm(env: Bindings) {
   const baseURL = `https://gateway.ai.cloudflare.com/v1/${env.AI_GATEWAY_ACCOUNT_ID}/${env.AI_GATEWAY_NAME}/google-ai-studio/v1beta`;

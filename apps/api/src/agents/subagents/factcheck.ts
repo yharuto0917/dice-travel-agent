@@ -1,5 +1,6 @@
 import { PlanDaySchema } from "@repo/shared";
 import { generateText, Output, stepCountIs, tool } from "ai";
+import { google, GoogleGenerativeAIProviderOptions } from "@ai-sdk/google";
 import { z } from "zod";
 import type { Bindings } from "../../env";
 import { SUBAGENT_MAX_STEPS } from "../flow/judgement";
@@ -26,7 +27,16 @@ export function buildFactcheckSubagent(env: Bindings, ctx: ToolContext) {
         system:
           "You are a fact-checking subagent. Validate the travel times, budget constraints, and potential time overlaps using the provided tools, then report whether the day is feasible and list concrete issues.",
         prompt: `Day plan: ${JSON.stringify(day, null, 2)}\nBudget: ${budget ?? "unspecified"}`,
+        providerOptions: {
+          google: {
+            thinkingConfig: {
+              thinkingLevel: "high",
+              includeThoughts: true,
+            },
+          },
+        },
         tools: {
+          google_search: google.tools.googleSearch({}),
           transportationSearch: buildTransportationSearch(ctx),
           calculate: buildCalculate(ctx),
         },

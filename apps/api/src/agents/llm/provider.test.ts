@@ -19,7 +19,7 @@ describe("llm/provider", () => {
 
   it("should create LLM with correct baseURL and model", () => {
     const llm = createLlm(env);
-    expect(llm.modelId).toBe("gemini-2.5-flash");
+    expect(llm.modelId).toBe("gemini-3.5-flash");
     expect(llm.provider).toBe("google.generative-ai");
   });
 });

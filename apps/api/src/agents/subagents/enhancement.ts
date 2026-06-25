@@ -1,5 +1,6 @@
+import type { GoogleGenerativeAIProviderOptions } from "@ai-sdk/google";
+import { google } from "@ai-sdk/google";
 import { generateText, stepCountIs, tool } from "ai";
-import { google, GoogleGenerativeAIProviderOptions } from "@ai-sdk/google";
 import { z } from "zod";
 import type { Bindings } from "../../env";
 import { SUBAGENT_MAX_STEPS } from "../flow/judgement";
@@ -35,7 +36,7 @@ export function buildEnhancementSubagent(env: Bindings, ctx: ToolContext) {
               thinkingLevel: "high",
               includeThoughts: true,
             },
-          },
+          } satisfies GoogleGenerativeAIProviderOptions,
         },
         tools: {
           google_search: google.tools.googleSearch({}),

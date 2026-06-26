@@ -3,6 +3,7 @@ import {
   AgentStateSchema,
   type GeoPoint,
   type HitlQuestion,
+  prefectureCentroid,
   type TravelPlanDraft,
 } from "@repo/shared";
 import { Agent, callable } from "agents";
@@ -194,19 +195,25 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
     this.setActivity("計画を検証・保存しています…");
     const destPoint = await this.loadDestPoint(createClients(this.env), row.destinationPref);
 
+    // 行き先は確定済み（行に prefectureCode あり）なら必ず destination を構成する。
+    // location はジオコーディング結果を優先し、失敗(null)時は県庁所在地の代表点へ
+    // フォールバックする。座標欠落で完成スキーマ検証が落ち、completed プランが
+    // destination 欠落のまま保存される事態を防ぐ。
+    const destLocation = destPoint ?? prefectureCentroid(row.destinationPrefCode);
+
     // 完成スキーマが要求する必須項目（id/destination/conditions/images）を既知値から補う。
     const candidate: TravelPlanDraft = {
       ...plan,
       id: plan.id ?? this.name,
       status: "completed",
       ...(row.conditions ? { conditions: row.conditions } : {}),
-      ...(destPoint && row.destinationPrefCode
+      ...(row.destinationPrefCode && destLocation
         ? {
             destination: {
               id: this.name,
               prefectureCode: row.destinationPrefCode,
               prefecture: row.destinationPref ?? "",
-              location: destPoint,
+              location: destLocation,
               tags: [],
             },
           }
@@ -277,6 +284,12 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
     const db = getDb(this.env);
     const currentVersion = row.version ?? 1;
 
+    // 旧 plan がある場合のみ「旧版を currentVersion で退避 → 新版を +1」とする。
+    // 初回確定（旧 plan が null）はスナップショット対象が無いため version を据え置き、
+    // 最初の完成プランを version 1 として残す。据え置かないと最初の版が
+    // plan_versions に存在せず diff/履歴から永久に辿れなくなる。
+    const nextVersion = row.plan ? currentVersion + 1 : currentVersion;
+
     if (row.plan) {
       await db.insert(planVersions).values({
         id: crypto.randomUUID(),
@@ -292,7 +305,7 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
         plan: finalPlan,
         status: "completed",
         title: finalPlan.title ?? row.title,
-        version: currentVersion + 1,
+        version: nextVersion,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(plans.id, this.name));

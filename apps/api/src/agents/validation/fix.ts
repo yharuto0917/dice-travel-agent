@@ -62,12 +62,16 @@ export async function fillEmptyDays(
     `条件: ${JSON.stringify(plan.conditions ?? {})}`,
   ].join("\n");
 
+  // LLM クライアントは全日で不変。各日のループ内で作り直すと同一の認証/Gateway
+  // 構成のプロバイダを無駄に再生成するため、Promise.all の外で一度だけ生成する。
+  const model = createLlm(env, SUPERVISOR_MODEL_ID);
+
   const repaired = await Promise.all(
     days.map(async (day): Promise<PlanDay> => {
       if (day.items.length > 0) return day;
       try {
         const { object } = await generateObject({
-          model: createLlm(env, SUPERVISOR_MODEL_ID),
+          model,
           // フラットな生成スキーマで anyOf を回避し、items が空のまま返るのを防ぐ。
           schema: PlanDayGenSchema,
           temperature: 0,
@@ -111,6 +115,9 @@ export async function fixPlan(
   let current: TravelPlanDraft = plan;
   let currentErrors = errors;
 
+  // 各試行で同一構成のプロバイダを再生成しないよう、ループ外で一度だけ生成する。
+  const model = createLlm(env, SUPERVISOR_MODEL_ID);
+
   for (let i = 0; i < attempts; i++) {
     // 退行(同語反復ループ)を抑止するため temperature 0 / 出力上限 / 思考最小で決定的に修復する。
     // generateObject が退行や JSON 破綻で throw しても finalize を固めないよう、各試行を
@@ -119,7 +126,7 @@ export async function fixPlan(
     try {
       const result = await generateObject({
         // 修復も品質重視で Supervisor モデル。退行防止のため思考は low 固定。
-        model: createLlm(env, SUPERVISOR_MODEL_ID),
+        model,
         schema: PlanRepairSchema,
         temperature: 0,
         maxOutputTokens: REPAIR_MAX_OUTPUT_TOKENS,

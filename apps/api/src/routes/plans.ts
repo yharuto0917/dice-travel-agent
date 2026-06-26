@@ -101,18 +101,25 @@ plansRoute.get("/:id/versions", async (c) => {
 /** 計画 plan カラムの型（TravelPlanDraft | null）。 */
 type StoredPlan = PlanRow["plan"];
 
+/**
+ * 指定 version の解決結果。`found` は version レコードの存在、`plan` はその内容。
+ * 「version が存在しない」と「存在するが plan が null」を呼び出し側で区別できるよう
+ * 両者を分けて返す。
+ */
+type ResolvedVersion = { found: boolean; plan: StoredPlan };
+
 /** 指定 version の計画 JSON を解決する（現行版なら plans.plan）。 */
 async function resolvePlanAtVersion(
   db: ReturnType<typeof getDb>,
   row: PlanRow,
   version: number,
-): Promise<StoredPlan> {
-  if (version === row.version) return row.plan ?? null;
+): Promise<ResolvedVersion> {
+  if (version === row.version) return { found: true, plan: row.plan ?? null };
   const [v] = await db
     .select()
     .from(planVersions)
     .where(and(eq(planVersions.planId, row.id), eq(planVersions.version, version)));
-  return v?.plan ?? null;
+  return { found: v != null, plan: v?.plan ?? null };
 }
 
 /** 2版間の差分（?from=&to= はバージョン番号。現行版も指定可）。 */
@@ -132,9 +139,11 @@ plansRoute.get("/:id/diff", async (c) => {
     resolvePlanAtVersion(db, row, from),
     resolvePlanAtVersion(db, row, to),
   ]);
-  if (!a || !b) return c.json({ error: "version not found" }, 404);
+  if (!a.found || !b.found) return c.json({ error: "version not found" }, 404);
+  // version は存在するが plan 本体が無い（null）場合は差分対象が無い旨を 409 で返す。
+  if (!a.plan || !b.plan) return c.json({ error: "version has no plan content" }, 409);
 
-  return c.json({ diff: diffPlans(a, b) });
+  return c.json({ diff: diffPlans(a.plan, b.plan) });
 });
 
 /** バージョン復元: 現行を退避し、指定 version の plan を現行へ戻す。 */
@@ -146,7 +155,8 @@ plansRoute.post("/:id/restore", zValidator("json", RestorePlanRequestSchema), as
 
   const { version } = c.req.valid("json");
   const target = await resolvePlanAtVersion(db, row, version);
-  if (!target) return c.json({ error: "version not found" }, 404);
+  if (!target.found) return c.json({ error: "version not found" }, 404);
+  if (!target.plan) return c.json({ error: "version has no plan content" }, 409);
 
   // 現行 plan を退避してから復元する（履歴を失わない）。
   if (row.plan) {
@@ -162,7 +172,7 @@ plansRoute.post("/:id/restore", zValidator("json", RestorePlanRequestSchema), as
   const nextVersion = row.version + 1;
   await db
     .update(plans)
-    .set({ plan: target, version: nextVersion, updatedAt: new Date().toISOString() })
+    .set({ plan: target.plan, version: nextVersion, updatedAt: new Date().toISOString() })
     .where(eq(plans.id, id));
 
   const updated = await loadOwnedPlan(db, id, c.get("clientId"));

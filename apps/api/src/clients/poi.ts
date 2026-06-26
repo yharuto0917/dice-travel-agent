@@ -65,12 +65,13 @@ export class PoiClient extends ApiClientBase {
   private async searchWithGoogle(lat: number, lng: number, radius: number): Promise<Poi[]> {
     const url = "https://places.googleapis.com/v1/places:searchNearby";
     const body = {
+      // Places API (New) の Table A に存在する型のみ指定する。
+      // 旧コードの "landmark" は無効型で 400 (Unsupported types: landmark) になっていた。
       includedTypes: [
         "tourist_attraction",
         "park",
         "museum",
         "amusement_park",
-        "landmark",
         "historical_landmark",
       ],
       maxResultCount: 10,
@@ -97,7 +98,11 @@ export class PoiClient extends ApiClientBase {
     });
 
     if (!response.ok) {
-      throw new Error(`Google Places API returned status ${response.status}`);
+      // 原因特定のため Google のエラー本文（INVALID_ARGUMENT メッセージ等）を含める。
+      const detail = await response.text().catch(() => "");
+      throw new Error(
+        `Google Places API returned status ${response.status}${detail ? `: ${detail.slice(0, 300)}` : ""}`,
+      );
     }
 
     // biome-ignore lint/suspicious/noExplicitAny: response structure is dynamic

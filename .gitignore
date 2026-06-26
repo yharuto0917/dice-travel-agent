@@ -1,6 +1,10 @@
 # turbo
 .turbo
 
+# 一時的な diff/パッチダンプ（レビュー用に生成したものをコミットしない）
+*.diff
+*.patch
+
 # open-next
 .open-next
 .next

@@ -35,17 +35,16 @@ export function Dice({ gameState, onRollComplete, triggerRoll }: DiceProps) {
 
   const velocity = useRef([0, 0, 0]);
   const angularVelocity = useRef([0, 0, 0]);
-  // 投擲後に一度でも明確に動いたかを記録する。
-  // これを満たすまで静止判定を行わないことで、再投擲直後に worker への
-  // 速度反映が遅れて「静止」と誤検出し、振り直し前の出目を返す事故を防ぐ。
-  const hasMoved = useRef(false);
+  // 投擲開始時刻。再投擲直後は worker への速度反映が遅れ、velocity.current が
+  // 直前の静止値（ほぼ0）のままで「静止」と誤検出し、振り直し前の出目を返す事故が起きる。
+  // これを防ぐため、投擲から一定時間が経過するまでは静止判定を行わない。
+  // （cannon の velocity 購読は投擲直後のピーク速度を取りこぼすことがあり、
+  //   速度しきい値で「動いた」を判定する方式は信頼できないため時間ベースにする。）
+  const rollStartTime = useRef(0);
 
   useEffect(() => {
     const unsubscribeVel = api.velocity.subscribe((v) => {
       velocity.current = v;
-      if (Math.abs(v[0]) > 1 || Math.abs(v[1]) > 1 || Math.abs(v[2]) > 1) {
-        hasMoved.current = true;
-      }
     });
     const unsubscribeAngVel = api.angularVelocity.subscribe((v) => {
       angularVelocity.current = v;
@@ -59,8 +58,8 @@ export function Dice({ gameState, onRollComplete, triggerRoll }: DiceProps) {
   // Roll trigger
   useEffect(() => {
     if (triggerRoll > 0) {
-      // 新しい投擲の開始。前回の「動いた」記録をリセットする。
-      hasMoved.current = false;
+      // 新しい投擲の開始時刻を記録する（静止判定の最小経過時間ガード用）。
+      rollStartTime.current = performance.now();
       api.wakeUp();
       // Start higher to allow for a good drop and bounce, but within boundaries
       api.position.set((Math.random() - 0.5) * 2, 4, (Math.random() - 0.5) * 2);
@@ -90,8 +89,11 @@ export function Dice({ gameState, onRollComplete, triggerRoll }: DiceProps) {
           Math.abs(angularVelocity.current[1]) < 0.05 &&
           Math.abs(angularVelocity.current[2]) < 0.05;
 
-        // 投擲後に一度も動いていない（worker への反映待ち）間は確定しない。
-        if (isSteady && hasMoved.current && ref.current) {
+        // 投擲直後（worker への反映待ち）の誤検出を避けるため、
+        // 一定時間が経過するまでは静止判定を確定させない。
+        const movedLongEnough = performance.now() - rollStartTime.current > 700;
+
+        if (isSteady && movedLongEnough && ref.current) {
           const quaternion = new THREE.Quaternion();
           // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call
           (ref.current as THREE.Object3D).getWorldQuaternion(quaternion);

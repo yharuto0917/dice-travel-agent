@@ -113,6 +113,22 @@ function GeneratingInner({ planId }: { planId: string }) {
               />
             </div>
 
+            {/* ストリーミング中の実行状況（思考・ツール実行）をライブ表示 */}
+            {!isDone && !isError && state?.activity ? (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center gap-2 text-xs font-bold text-muted">
+                  <span className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+                  <span className="truncate">{state.activity}</span>
+                </div>
+                {/* 思考中の要約テキスト（Gemini reasoning）を流し込む */}
+                {state.thought ? (
+                  <p className="line-clamp-3 rounded-xl bg-surface-2/60 px-3 py-2 text-[0.7rem] leading-relaxed text-muted/90">
+                    {state.thought}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
             {/* 充填済みセクション */}
             {state && state.filledSections.length > 0 ? (
               <div className="flex flex-wrap gap-1.5">
@@ -139,6 +155,7 @@ function GeneratingInner({ planId }: { planId: string }) {
                 question={q.question}
                 options={q.options}
                 onAnswer={(answer) => void agent.stub.answerQuestion(q.id, answer)}
+                onSkip={() => void agent.stub.skipQuestion(q.id)}
               />
             ))}
           </div>
@@ -215,15 +232,17 @@ function PlanPreview({ plan }: { plan: NonNullable<AgentState["plan"]> }) {
   );
 }
 
-/** HITL 質問1件の回答 UI（足場）。 */
+/** HITL 質問1件の回答 UI。回答・選択・スキップに対応する。 */
 function HitlQuestionCard({
   question,
   options,
   onAnswer,
+  onSkip,
 }: {
   question: string;
   options?: string[];
   onAnswer: (answer: string) => void;
+  onSkip: () => void;
 }) {
   const [text, setText] = useState("");
   return (
@@ -252,6 +271,14 @@ function HitlQuestionCard({
             </Button>
           </div>
         )}
+        {/* 回答せず進める（サーバ側はタイムアウトでも自動スキップする）。 */}
+        <button
+          type="button"
+          onClick={onSkip}
+          className="self-start text-xs font-bold text-muted underline-offset-2 hover:underline"
+        >
+          スキップして進める
+        </button>
       </CardBody>
     </Card>
   );

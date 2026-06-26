@@ -47,12 +47,35 @@ export function fetchClientId(): Promise<{ clientId: string }> {
   return apiJson<{ clientId: string }>("/me");
 }
 
-import type { CreatePlanRequest } from "@repo/shared";
+import type { CreatePlanRequest, GetPlanResponse, PlanDiff, PlanVersionMeta } from "@repo/shared";
 
 /** 旅の条件と行き先を元に新しい計画を作成する */
 export function createPlan(data: CreatePlanRequest): Promise<{ id: string }> {
   return apiJson<{ id: string }>("/plans", {
     method: "POST",
     body: JSON.stringify(data),
+  });
+}
+
+/** 計画を取得する（しおり表示・D1 が単一の真実, #16）。 */
+export function getPlan(id: string): Promise<GetPlanResponse> {
+  return apiJson<GetPlanResponse>(`/plans/${id}`);
+}
+
+/** 計画のバージョン履歴（メタのみ）を取得する。 */
+export function getPlanVersions(id: string): Promise<{ versions: PlanVersionMeta[] }> {
+  return apiJson<{ versions: PlanVersionMeta[] }>(`/plans/${id}/versions`);
+}
+
+/** 2版間の差分を取得する。 */
+export function getPlanDiff(id: string, from: number, to: number): Promise<{ diff: PlanDiff }> {
+  return apiJson<{ diff: PlanDiff }>(`/plans/${id}/diff?from=${from}&to=${to}`);
+}
+
+/** 指定バージョンを現行へ復元する。 */
+export function restorePlanVersion(id: string, version: number): Promise<GetPlanResponse> {
+  return apiJson<GetPlanResponse>(`/plans/${id}/restore`, {
+    method: "POST",
+    body: JSON.stringify({ version }),
   });
 }

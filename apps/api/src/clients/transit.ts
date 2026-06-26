@@ -33,8 +33,12 @@ export class TransitClient extends ApiClientBase {
       async () => {
         if (this.googleApiKey) {
           try {
-            return await this.getDirectionsWithGoogle(from, to, fromName, toName, mode);
+            const result = await this.getDirectionsWithGoogle(from, to, fromName, toName, mode);
+            if (result) return result;
+            // result === null は ZERO_RESULTS / NOT_FOUND（経路が見つからない正常応答）。
+            // エラーではないので [ERROR] ログを出さず、静かに概算へフォールバックする。
           } catch (error) {
+            // 権限/レート/通信エラー等の想定外失敗のみ ERROR ログを出す。
             console.error(
               "[TransitClient] Google Directions failed, falling back to estimation:",
               error,
@@ -56,7 +60,7 @@ export class TransitClient extends ApiClientBase {
     fromName: string,
     toName: string,
     mode: "walk" | "transit" | "car" | "bicycle" | "other",
-  ): Promise<TransportLeg[]> {
+  ): Promise<TransportLeg[] | null> {
     const googleModeMap: Record<string, string> = {
       walk: "walking",
       transit: "transit",
@@ -75,8 +79,16 @@ export class TransitClient extends ApiClientBase {
 
     // biome-ignore lint/suspicious/noExplicitAny: response structure is dynamic
     const data = (await response.json()) as any;
+    // ZERO_RESULTS / NOT_FOUND は「経路が見つからない」正常応答（例: 近すぎ・水域越え・
+    // 公共交通の無い区間）。エラー扱いせず null を返し、呼び出し側で概算へフォールバックさせる。
+    if (data.status === "ZERO_RESULTS" || data.status === "NOT_FOUND") {
+      return null;
+    }
     if (data.status !== "OK" || !data.routes || data.routes.length === 0) {
-      throw new Error(`Google Directions API returned status ${data.status}`);
+      // REQUEST_DENIED / OVER_QUERY_LIMIT / INVALID_REQUEST 等は真の失敗。error_message も含める。
+      throw new Error(
+        `Google Directions API returned status ${data.status}${data.error_message ? `: ${data.error_message}` : ""}`,
+      );
     }
 
     const route = data.routes[0];

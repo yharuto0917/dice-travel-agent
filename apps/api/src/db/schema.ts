@@ -24,10 +24,31 @@ export const plans = sqliteTable(
     destinationPref: text("destination_pref"),
     conditions: text("conditions", { mode: "json" }).$type<TripConditions>(),
     plan: text("plan", { mode: "json" }).$type<TravelPlanDraft>(),
+    /** 現行版ポインタ。更新の都度インクリメントし plan_versions と対応づける（#16）。 */
+    version: integer("version").notNull().default(1),
     createdAt: timestamp("created_at"),
     updatedAt: timestamp("updated_at"),
   },
   (t) => [index("plans_client_id_idx").on(t.clientId)],
+);
+
+/**
+ * 計画のバージョン履歴（#16）。更新（finalize/復元/チャット編集）の都度、
+ * 上書き前の plan を 1 行スナップショットする。差分表示・復元の基盤。
+ */
+export const planVersions = sqliteTable(
+  "plan_versions",
+  {
+    id: text("id").primaryKey(),
+    planId: text("plan_id")
+      .notNull()
+      .references(() => plans.id),
+    version: integer("version").notNull(),
+    plan: text("plan", { mode: "json" }).$type<TravelPlanDraft>(),
+    label: text("label"),
+    createdAt: timestamp("created_at"),
+  },
+  (t) => [index("plan_versions_plan_id_idx").on(t.planId)],
 );
 
 /**
@@ -80,6 +101,7 @@ export const images = sqliteTable(
 );
 
 export type PlanRow = typeof plans.$inferSelect;
+export type PlanVersionRow = typeof planVersions.$inferSelect;
 export type RateLimitRow = typeof rateLimits.$inferSelect;
 export type ChatMessageRow = typeof chatMessages.$inferSelect;
 export type ImageRow = typeof images.$inferSelect;

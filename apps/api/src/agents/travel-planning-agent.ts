@@ -343,12 +343,19 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
    * 古い順に上限件数へ丸めてから setState する。activity（最新の一行）と違い履歴として残る。
    */
   private pushTimeline(input: TimelineInput, dayNumber: number | null = null): void {
+    // groupId は当日番号で名前空間化する。orchestrator は日をまたいで同じ groupId
+    // （例: "think-1"）を再採番するため、前置しないと別日の start/done が衝突する。
+    const groupId = input.groupId
+      ? dayNumber != null
+        ? `d${dayNumber}:${input.groupId}`
+        : input.groupId
+      : null;
     const event: TimelineEvent = {
       id: crypto.randomUUID(),
       kind: input.kind,
       label: input.label,
       status: input.status ?? "done",
-      groupId: input.groupId ?? null,
+      groupId,
       detail: input.detail ?? null,
       dayNumber,
       at: new Date().toISOString(),

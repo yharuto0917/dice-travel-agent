@@ -74,6 +74,9 @@ function reasoningTail(s: string, max = 200): string {
   return t.length > max ? `…${t.slice(-max)}` : t;
 }
 
+/** タイムラインに残す「終わった思考」の本文上限。DO state 同期の肥大を防ぐため切り詰める。 */
+const MAX_THOUGHT_DETAIL = 2000;
+
 /** 構造化(当日 items 生成)の出力上限。1日分の itinerary を収めつつ退行を短時間で打ち切る。 */
 const STRUCTURE_MAX_OUTPUT_TOKENS = 4096;
 /** サニタイズ時の最大文字数（タイトル/説明）。退行で混入した巨大文字列を切り詰める。 */
@@ -185,12 +188,32 @@ export async function runDay(
   // 思考(reasoning)は毎デルタ送ると setState が氾濫するため、約40文字たまるごとに末尾を送る。
   let reasoningBuf = "";
   let emittedLen = 0;
+  let reasoningSeq = 0;
+  let reasoningId: string | null = null;
   let finalText = "";
   const toolNotes: string[] = [];
+
+  // 進行中の思考ブロックを「終わった思考」として履歴へ確定する。reasoning の全文を
+  // detail に載せ（上限で切り詰め）、フロントで開いて読めるようにする。思考が空なら何もしない。
+  const flushThinking = () => {
+    if (reasoningId && reasoningBuf.trim()) {
+      onEvent?.({
+        kind: "thinking",
+        label: "思考しました",
+        status: "done",
+        groupId: reasoningId,
+        detail: reasoningBuf.trim().slice(0, MAX_THOUGHT_DETAIL),
+      });
+    }
+    reasoningId = null;
+    reasoningBuf = "";
+    emittedLen = 0;
+  };
+
   for await (const part of result.fullStream) {
     if (part.type === "tool-input-start") {
-      reasoningBuf = "";
-      emittedLen = 0;
+      // 思考の直後にツールへ移ることが多いので、まず進行中の思考を確定する。
+      flushThinking();
       const label = toolLabel(part.toolName);
       onActivity?.(label);
       // ツール／サブエージェントの「開始」を履歴へ。groupId はツール呼び出しIDで done と対にする。
@@ -217,22 +240,34 @@ export async function runDay(
         detail: isSubagent ? compactJson(part.output, 200) : null,
       });
     } else if (part.type === "reasoning-start") {
-      reasoningBuf = "";
-      emittedLen = 0;
+      // 前の思考ブロックが未確定なら閉じてから、新しい思考の「開始」を履歴へ積む。
+      flushThinking();
+      reasoningSeq += 1;
+      reasoningId = `think-${reasoningSeq}`;
       onActivity?.("思考しています…", "");
+      onEvent?.({
+        kind: "thinking",
+        label: "思考しています",
+        status: "start",
+        groupId: reasoningId,
+      });
     } else if (part.type === "reasoning-delta") {
       reasoningBuf += part.text;
       if (reasoningBuf.length - emittedLen >= 40) {
         emittedLen = reasoningBuf.length;
         onActivity?.("思考しています…", reasoningTail(reasoningBuf));
       }
+    } else if (part.type === "reasoning-end") {
+      flushThinking();
     } else if (part.type === "text-delta") {
-      reasoningBuf = "";
-      emittedLen = 0;
+      // 最終テキストへ移る前に進行中の思考を確定する。
+      flushThinking();
       finalText += part.text;
       onActivity?.("日程をまとめています…");
     }
   }
+  // ループ終了時に未確定の思考が残っていれば確定する。
+  flushThinking();
 
   // HITL が発火していたら、day を確定せずに中断を返す。空の日をマージしないため
   // finalizeDay/構造化より先に判定する。

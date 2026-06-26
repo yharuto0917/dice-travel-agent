@@ -253,10 +253,21 @@ function buildRows(events: TimelineEvent[]): TimelineRow[] {
   return order.map((k) => rows.get(k) as TimelineRow);
 }
 
-/** 実行履歴タイムライン。ツール・サブエージェント・フェーズ・確認の流れを時系列で表示する。 */
+/** 実行履歴タイムライン。ツール・サブエージェント・フェーズ・思考・確認の流れを時系列で表示する。 */
 function Timeline({ events }: { events: TimelineEvent[] }) {
   const rows = buildRows(events);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // detail を持つ行（終わった思考・サブエージェント結果）は既定で折りたたみ、クリックで開く。
+  const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
+
+  const toggle = (key: string) => {
+    setOpenKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   // 新しいイベントが来たら末尾（最新）へ自動スクロールする。
   useEffect(() => {
@@ -269,33 +280,57 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
       <CardBody className="flex flex-col gap-2">
         <p className="text-xs font-extrabold tracking-wide text-muted">実行履歴</p>
         <div ref={scrollRef} className="flex max-h-64 flex-col gap-1.5 overflow-y-auto pr-1">
-          {rows.map((row) => (
-            <div key={row.key} className="flex items-start gap-2 text-xs">
-              <span className="mt-0.5 shrink-0 leading-none">{TIMELINE_KIND_ICON[row.kind]}</span>
-              <span className="mt-0.5 shrink-0">
-                {row.status === "start" ? (
-                  <span className="inline-flex h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
-                ) : row.status === "error" ? (
-                  <WarningCircle size={13} weight="fill" className="text-red-500" />
-                ) : (
-                  <CheckCircle size={13} weight="fill" className="text-primary" />
-                )}
-              </span>
-              <div className="min-w-0">
-                <p className="font-bold text-foreground/90">
-                  {row.dayNumber ? (
-                    <span className="mr-1 text-muted">[{row.dayNumber}日目]</span>
+          {rows.map((row) => {
+            const hasDetail = !!row.detail;
+            const isOpen = openKeys.has(row.key);
+            return (
+              <div key={row.key} className="flex items-start gap-2 text-xs">
+                <span className="mt-0.5 shrink-0 leading-none">{TIMELINE_KIND_ICON[row.kind]}</span>
+                <span className="mt-0.5 shrink-0">
+                  {row.status === "start" ? (
+                    <span className="inline-flex h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                  ) : row.status === "error" ? (
+                    <WarningCircle size={13} weight="fill" className="text-red-500" />
+                  ) : (
+                    <CheckCircle size={13} weight="fill" className="text-primary" />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  {/* detail があれば行全体をトグルにして、終わった思考などを開いて読めるようにする。 */}
+                  {hasDetail ? (
+                    <button
+                      type="button"
+                      onClick={() => toggle(row.key)}
+                      className="flex w-full items-center gap-1 text-left"
+                      aria-expanded={isOpen}
+                    >
+                      <span className="font-bold text-foreground/90">
+                        {row.dayNumber ? (
+                          <span className="mr-1 text-muted">[{row.dayNumber}日目]</span>
+                        ) : null}
+                        {row.label}
+                      </span>
+                      <span className="shrink-0 text-[0.65rem] font-bold text-primary/80">
+                        {isOpen ? "閉じる" : row.kind === "thinking" ? "思考を見る" : "詳細"}
+                      </span>
+                    </button>
+                  ) : (
+                    <p className="font-bold text-foreground/90">
+                      {row.dayNumber ? (
+                        <span className="mr-1 text-muted">[{row.dayNumber}日目]</span>
+                      ) : null}
+                      {row.label}
+                    </p>
+                  )}
+                  {hasDetail && isOpen ? (
+                    <p className="mt-1 whitespace-pre-wrap rounded-lg bg-surface-2/60 px-2.5 py-1.5 text-[0.68rem] leading-relaxed text-muted/90">
+                      {row.detail}
+                    </p>
                   ) : null}
-                  {row.label}
-                </p>
-                {row.detail ? (
-                  <p className="line-clamp-2 text-[0.68rem] leading-relaxed text-muted/80">
-                    {row.detail}
-                  </p>
-                ) : null}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </CardBody>
     </Card>

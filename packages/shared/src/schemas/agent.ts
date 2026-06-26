@@ -42,5 +42,16 @@ export const AgentStateSchema = z.object({
   /** 進捗 0〜1 */
   progress: z.number().min(0).max(1).default(0),
   error: z.string().nullable().default(null),
+  /** ストリーミング中の実行状況（例: "観光スポットを検索しています"）。アイドル時は null。 */
+  activity: z.string().nullable().default(null),
+  /** 思考中の要約テキスト（Gemini の reasoning）。直近の末尾を表示用に保持。非思考時は null。 */
+  thought: z.string().nullable().default(null),
+  /**
+   * HITL/タイムアウトで一時停止した際に再開すべき runStep の index。
+   * `awaiting_user` 中のみ非 null。回答・スキップ・タイムアウトで同 index を再 schedule する。
+   */
+  resumeIndex: z.number().int().nullable().default(null),
+  /** `awaiting_user` に入った時刻(ISO)。タイムアウト判定の起点（内部用途）。 */
+  awaitingSince: z.string().nullable().default(null),
 });
 export type AgentState = z.infer<typeof AgentStateSchema>;

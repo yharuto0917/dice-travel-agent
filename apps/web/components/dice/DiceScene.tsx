@@ -1,5 +1,4 @@
 import { Physics } from "@react-three/cannon";
-import { Environment } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
 import type { DiceFace } from "@repo/shared";
 import { useDiceStore } from "@/lib/stores/diceStore";
@@ -45,7 +44,10 @@ export function DiceScene({
         <orthographicCamera attach="shadow-camera" args={[-8, 8, 8, -8, 0.1, 50]} />
       </directionalLight>
 
-      <Environment preset="city" />
+      {/* 反射用の環境マップ（drei の <Environment preset="city" />）は外部CDNからHDRを
+          取得する。読み込み中は Suspense がシーン全体を保留するため、取得が遅い/失敗する環境では
+          サイコロが描画されない。視覚的寄与も小さい（dice は metalness 0.1）ため不採用とし、
+          ライティングのみで陰影をつける。反射が必要になった場合はネットワーク非依存の手段を検討する。 */}
 
       <Physics gravity={[0, -20, 0]}>
         <Table />

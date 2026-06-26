@@ -174,7 +174,7 @@ apps/web/
 - `routes/plans.ts`（所有者スコープ・GET取得・versions・restore）。
 
 ### E2E ローカル
-1. `.dev.vars` に `GEMINI_API_KEY`、`wrangler d1 migrations apply` 済み。
+1. `.dev.vars` に `GEMINI_API_KEY`（Google AI Studio 鍵）＋ `AI_GATEWAY_TOKEN`（認証必須 Gateway 用 CF API トークン）、`wrangler d1 migrations apply` 済み。パススルー方式（x-goog-api-key ＋ cf-aig-authorization 併送）。
 2. 曖昧条件で生成 → `awaiting_user`+questions が WebSocket 同期 → 回答で再開完走 / 無回答放置で `hitlTimeout` により skip 完走。
 3. 完成計画が `TravelPlanSchema` 検証通過 → status=completed で D1 保存 → `GET /plans/:id` 取得 → `/itinerary` が D1 から表示。
 4. plan 更新で `plan_versions` にスナップショット → `GET versions/diff`・`POST restore` 動作。
@@ -197,5 +197,3 @@ apps/web/
 - **AgentState 肥大**: `resumeIndex`/`awaitingSince` は client 同期されるが内部用途で無害。ドキュメント化する。
 - **fix 無限化防止**: N回失敗は必ず決定的フォールバックへ着地。
 - `.env`/`.dev.vars` は変更・コミットしない。
-</content>
-</invoke>

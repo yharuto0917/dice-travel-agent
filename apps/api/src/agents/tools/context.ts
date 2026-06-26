@@ -1,4 +1,4 @@
-import type { GeoPoint, TripConditions as PlanConditions } from "@repo/shared";
+import type { GeoPoint, HitlQuestion, TripConditions as PlanConditions } from "@repo/shared";
 import type { createClients } from "../../clients";
 
 export interface UsageCounter {
@@ -8,9 +8,20 @@ export interface UsageCounter {
   subagent: () => void;
 }
 
+/**
+ * HITL コレクタ。`humanInTheLoop` ツールが pending に質問を積み、
+ * オーケストレータが `pending.length>0` でループを停止する。
+ * `answers` は再開時に既回答の Q&A をプロンプトへ反映するためのマップ。
+ */
+export interface HitlCollector {
+  pending: HitlQuestion[];
+  answers: Record<string, string>;
+}
+
 export interface ToolContext {
   clients: ReturnType<typeof createClients>;
   destPoint: GeoPoint | null;
   conditions: Partial<PlanConditions>;
   usage: UsageCounter;
+  hitl: HitlCollector;
 }

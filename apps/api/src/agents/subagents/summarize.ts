@@ -1,8 +1,9 @@
-import { PlanDaySchema } from "@repo/shared";
+import type { GoogleGenerativeAIProviderOptions } from "@ai-sdk/google";
+import { PlanDayGenSchema } from "@repo/shared";
 import { generateText, tool } from "ai";
 import { z } from "zod";
 import type { Bindings } from "../../env";
-import { createLlm } from "../llm/provider";
+import { createLlm, SUBAGENT_MODEL_ID } from "../llm/provider";
 import type { ToolContext } from "../tools/context";
 
 export function buildSummarizeSubagent(env: Bindings, ctx: ToolContext) {
@@ -14,7 +15,8 @@ export function buildSummarizeSubagent(env: Bindings, ctx: ToolContext) {
       title: z.string().optional().describe("Plan title"),
       summary: z.string().optional().describe("Existing plan summary, if any"),
       days: z
-        .array(PlanDaySchema)
+        // 入力でも union(anyOf) を避け、フラットな生成スキーマで受ける。
+        .array(PlanDayGenSchema)
         .optional()
         .describe("Days to summarize (one element for a single day)"),
     }),
@@ -22,10 +24,18 @@ export function buildSummarizeSubagent(env: Bindings, ctx: ToolContext) {
       ctx.usage.subagent();
 
       const { text } = await generateText({
-        model: createLlm(env),
+        model: createLlm(env, SUBAGENT_MODEL_ID),
         system:
-          "You are a summarizing subagent. Provide a concise, attractive summary of the travel plan or day provided.",
+          "You are a summarizing subagent. Provide a concise, attractive summary of the travel plan or day provided. 出力（要約テキスト）は必ず日本語で記述してください。",
         prompt: `Data: ${JSON.stringify({ title, summary, days }, null, 2)}`,
+        providerOptions: {
+          google: {
+            thinkingConfig: {
+              thinkingLevel: "high",
+              includeThoughts: true,
+            },
+          } satisfies GoogleGenerativeAIProviderOptions,
+        },
       });
 
       return { summary: text };

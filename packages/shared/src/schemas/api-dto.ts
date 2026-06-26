@@ -93,6 +93,7 @@ export const TransportLegSchema = z.object({
 export type TransportLeg = z.infer<typeof TransportLegSchema>;
 
 import { TripConditionsSchema } from "./conditions";
+import { TravelPlanDraftSchema } from "./plan";
 
 /** 計画作成リクエスト */
 export const CreatePlanRequestSchema = z.object({
@@ -101,3 +102,23 @@ export const CreatePlanRequestSchema = z.object({
   conditions: TripConditionsSchema,
 });
 export type CreatePlanRequest = z.infer<typeof CreatePlanRequestSchema>;
+
+/** 計画取得レスポンス（GET /plans/:id, #16）。`plan` は完成前は下書き。 */
+export const GetPlanResponseSchema = z.object({
+  id: z.string(),
+  status: z.enum(["draft", "completed"]),
+  title: z.string().nullable(),
+  destinationPref: z.string().nullable(),
+  conditions: TripConditionsSchema.nullable(),
+  plan: TravelPlanDraftSchema.nullable(),
+  version: z.number().int().min(1),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type GetPlanResponse = z.infer<typeof GetPlanResponseSchema>;
+
+/** バージョン復元リクエスト（POST /plans/:id/restore, #16）。 */
+export const RestorePlanRequestSchema = z.object({
+  version: z.number().int().min(1),
+});
+export type RestorePlanRequest = z.infer<typeof RestorePlanRequestSchema>;

@@ -4,7 +4,7 @@ import { generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import type { Bindings } from "../../env";
 import { SUBAGENT_MAX_STEPS } from "../flow/judgement";
-import { createLlm } from "../llm/provider";
+import { createLlm, SUBAGENT_MODEL_ID } from "../llm/provider";
 import type { ToolContext } from "../tools/context";
 import { buildGoogleMaps } from "../tools/google-maps";
 import { buildRestaurantSearch } from "../tools/restaurant-search";
@@ -22,9 +22,9 @@ export function buildResearchSubagent(env: Bindings, ctx: ToolContext) {
       ctx.usage.subagent();
 
       const { text } = await generateText({
-        model: createLlm(env),
+        model: createLlm(env, SUBAGENT_MODEL_ID),
         system:
-          "You are a research subagent for a travel planning system. Gather information using the provided tools and output a clear summary of your findings and candidate locations.",
+          "You are a research subagent for a travel planning system. Gather information using the provided tools and output a clear summary of your findings and candidate locations. 思考（reasoning）と最終的なまとめは、すべて日本語で記述してください。",
         prompt: `Topic: ${topic}\nAround: ${around || "Not specified"}`,
         providerOptions: {
           google: {

@@ -1,11 +1,11 @@
 import type { GoogleGenerativeAIProviderOptions } from "@ai-sdk/google";
 import { google } from "@ai-sdk/google";
-import { PlanDaySchema } from "@repo/shared";
+import { PlanDayGenSchema } from "@repo/shared";
 import { generateText, Output, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import type { Bindings } from "../../env";
 import { SUBAGENT_MAX_STEPS } from "../flow/judgement";
-import { createLlm } from "../llm/provider";
+import { createLlm, SUBAGENT_MODEL_ID } from "../llm/provider";
 import { buildCalculate } from "../tools/calculate";
 import type { ToolContext } from "../tools/context";
 import { buildTransportationSearch } from "../tools/transportation-search";
@@ -15,7 +15,8 @@ export function buildFactcheckSubagent(env: Bindings, ctx: ToolContext) {
     description:
       "Check the feasibility of a travel day plan (time overlap, realistic travel time, budget).",
     inputSchema: z.object({
-      day: PlanDaySchema.describe("The day plan to check"),
+      // 入力でも union(anyOf) を避け、フラットな生成スキーマで受ける。
+      day: PlanDayGenSchema.describe("The day plan to check"),
       budget: z.number().optional().describe("Remaining budget"),
     }),
     execute: async ({ day, budget }) => {
@@ -24,9 +25,9 @@ export function buildFactcheckSubagent(env: Bindings, ctx: ToolContext) {
       // stopWhen を指定しないと generateText は 1 ステップで止まり transportation/
       // calculate の結果がモデルに戻らない。ツール往復を許可しつつ構造化結果を返す。
       const { experimental_output } = await generateText({
-        model: createLlm(env),
+        model: createLlm(env, SUBAGENT_MODEL_ID),
         system:
-          "You are a fact-checking subagent. Validate the travel times, budget constraints, and potential time overlaps using the provided tools, then report whether the day is feasible and list concrete issues.",
+          "You are a fact-checking subagent. Validate the travel times, budget constraints, and potential time overlaps using the provided tools, then report whether the day is feasible and list concrete issues. 思考（reasoning）と issues の文言は、すべて日本語で記述してください。",
         prompt: `Day plan: ${JSON.stringify(day, null, 2)}\nBudget: ${budget ?? "unspecified"}`,
         providerOptions: {
           google: {

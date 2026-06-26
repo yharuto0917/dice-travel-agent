@@ -1,16 +1,32 @@
-import { type AgentState, AgentStateSchema, type GeoPoint, type HitlQuestion } from "@repo/shared";
+import {
+  type AgentState,
+  AgentStateSchema,
+  type GeoPoint,
+  type HitlQuestion,
+  type TravelPlanDraft,
+} from "@repo/shared";
 import { Agent, callable } from "agents";
 import { eq } from "drizzle-orm";
 import { createClients } from "../clients";
 import { getDb } from "../db/client";
-import { type PlanRow, plans } from "../db/schema";
+import { type PlanRow, plans, planVersions } from "../db/schema";
 import type { Bindings } from "../env";
-import { createUsageCounter } from "./flow/judgement";
+import { createUsageCounter, HITL_TIMEOUT_SEC } from "./flow/judgement";
 import { dayCountOf, mergeDay, nightsOf } from "./flow/merge";
 import { runDay } from "./flow/orchestrator";
 import { buildStepPlan } from "./flow/step-plan";
+import {
+  answeredMap,
+  answerInList,
+  hasPending,
+  skipInList,
+  skipManyInList,
+} from "./hitl/questions";
 import { hasLlm } from "./llm/provider";
 import { PLAN_PIPELINE } from "./pipeline";
+import type { ToolContext } from "./tools/context";
+import { checkPlan } from "./validation/checker";
+import { fillEmptyDays, fixPlan } from "./validation/fix";
 
 /** ステップ間の待ち（秒）。進行をクライアントで可視化するための小さな間隔。 */
 const STEP_DELAY_SEC = 1;
@@ -124,15 +140,27 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
       // 行き先のジオコーディングは全日で不変なので一度だけ実行してキャッシュする。
       const destPoint = await this.loadDestPoint(clients, row.destinationPref);
 
-      const ctx = {
+      const ctx: ToolContext = {
         clients,
         destPoint,
         conditions: row.conditions || {},
         usage: createUsageCounter(),
+        // 再開時、既回答の HITL Q&A をプロンプトへ反映し同じ質問の再発行を防ぐ。
+        hitl: { pending: [], answers: answeredMap(this.state.questions) },
       };
 
-      const day = await runDay(this.env, ctx, plan, n);
-      plan = mergeDay(plan, day);
+      // ストリーミングの実行状況・思考要約を activity / thought に反映する。
+      const result = await runDay(this.env, ctx, plan, n, (status, thought) =>
+        this.setActivity(status, thought ?? null),
+      );
+
+      // 計画担当が humanInTheLoop を呼んだら、当日を確定せず回答待ちで保留する。
+      if (result.status === "hitl") {
+        await this.enterAwaitingUser(index, result.questions);
+        return;
+      }
+
+      plan = mergeDay(plan, result.day);
 
       this.setState({
         ...this.state,
@@ -140,22 +168,12 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
         plan,
         filledSections: [...new Set([...this.state.filledSections, `day${n}`])],
         progress: (index + 1) / steps.length,
+        activity: null, // 当日完了。次ステップ開始までクリア。
+        thought: null,
       });
     } else if (step.type === "finalize") {
-      plan = {
-        ...plan,
-        status: "completed",
-        createdAt: new Date().toISOString(),
-      };
-
-      this.setState({
-        ...this.state,
-        phase: "done",
-        plan,
-        filledSections: [...new Set([...this.state.filledSections, "summary"])],
-        progress: 1,
-      });
-      // Do not schedule next step as this is the end
+      await this.finalizePlan(plan, row);
+      // 永続化まで完了したのでここで終了（次 step は schedule しない）。
       return;
     }
 
@@ -167,12 +185,182 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
     );
   }
 
+  /**
+   * 最終確定（#16）: 行き先/条件を注入して完成スキーマへ寄せ → checker → fix →
+   * 失敗時は決定的フォールバック（best-effort を completed 保存）。
+   * 上書き前に旧版を plan_versions へ退避し、部分失敗でも作業を失わない。
+   */
+  private async finalizePlan(plan: TravelPlanDraft, row: PlanRow): Promise<void> {
+    this.setActivity("計画を検証・保存しています…");
+    const destPoint = await this.loadDestPoint(createClients(this.env), row.destinationPref);
+
+    // 完成スキーマが要求する必須項目（id/destination/conditions/images）を既知値から補う。
+    const candidate: TravelPlanDraft = {
+      ...plan,
+      id: plan.id ?? this.name,
+      status: "completed",
+      ...(row.conditions ? { conditions: row.conditions } : {}),
+      ...(destPoint && row.destinationPrefCode
+        ? {
+            destination: {
+              id: this.name,
+              prefectureCode: row.destinationPrefCode,
+              prefecture: row.destinationPref ?? "",
+              location: destPoint,
+              tags: [],
+            },
+          }
+        : {}),
+      images: plan.images ?? [],
+      createdAt: plan.createdAt ?? new Date().toISOString(),
+    };
+
+    const check = checkPlan(candidate);
+    let finalPlan: TravelPlanDraft;
+    if (check.valid && check.parsed) {
+      finalPlan = check.parsed;
+    } else {
+      // まず「予定が空の日」を1日ずつ個別に再生成して埋める。全体を作り直す fixPlan は
+      // 複数日の全 JSON が出力上限を超えると切り詰めで破綻し修復が効かないため、出力が
+      // 小さく確実に収まる per-day 修復を先に通す（ユーザー報告の「各日の旅程が出ない」対策）。
+      let repaired = candidate;
+      if ((candidate.days ?? []).some((d) => d.items.length === 0)) {
+        this.setActivity("空の日程を作り直しています…");
+        try {
+          repaired = await fillEmptyDays(this.env, candidate);
+        } catch {
+          repaired = candidate;
+        }
+      }
+
+      const recheck = checkPlan(repaired);
+      if (recheck.valid && recheck.parsed) {
+        finalPlan = recheck.parsed;
+      } else {
+        // 残る軽微欠落（日数整合・予算超過など）は generateObject で修復（completed パスは
+        // 常に LLM 有）。修復が例外を投げても finalize を止めない: catch して best-effort を保存。
+        let fixed: TravelPlanDraft | null = null;
+        try {
+          fixed = await fixPlan(this.env, repaired, recheck.errors);
+        } catch {
+          fixed = null;
+        }
+        // 修復不能でも破綻させない: per-day 修復済みの best-effort を completed として保存する。
+        finalPlan = fixed ?? repaired;
+      }
+    }
+
+    await this.persistPlan(finalPlan, row);
+
+    this.setState({
+      ...this.state,
+      phase: "done",
+      plan: finalPlan,
+      filledSections: [...new Set([...this.state.filledSections, "summary"])],
+      progress: 1,
+      activity: null,
+      thought: null,
+    });
+  }
+
+  /**
+   * ストリーミング中の実行状況（activity）と思考要約（thought）を反映する。
+   * 値に変化が無ければ setState せず、ブロードキャストの氾濫を防ぐ。
+   */
+  private setActivity(status: string, thought: string | null = null): void {
+    if (this.state.activity === status && this.state.thought === thought) return;
+    this.setState({ ...this.state, activity: status, thought });
+  }
+
+  /** 完成計画を D1 に保存。上書き前に旧版を plan_versions へスナップショットする（#16）。 */
+  private async persistPlan(finalPlan: TravelPlanDraft, row: PlanRow): Promise<void> {
+    const db = getDb(this.env);
+    const currentVersion = row.version ?? 1;
+
+    if (row.plan) {
+      await db.insert(planVersions).values({
+        id: crypto.randomUUID(),
+        planId: this.name,
+        version: currentVersion,
+        plan: row.plan,
+      });
+    }
+
+    await db
+      .update(plans)
+      .set({
+        plan: finalPlan,
+        status: "completed",
+        title: finalPlan.title ?? row.title,
+        version: currentVersion + 1,
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(plans.id, this.name));
+
+    // 次回 loadPlanRow で最新を読むようキャッシュを無効化する。
+    this.cachedRow = undefined;
+  }
+
+  /** HITL 回答待ちへ遷移し、タイムアウト alarm を仕掛ける（次 step は schedule しない）。 */
+  private async enterAwaitingUser(index: number, newQuestions: HitlQuestion[]): Promise<void> {
+    this.setState({
+      ...this.state,
+      phase: "awaiting_user",
+      questions: [...this.state.questions, ...newQuestions],
+      resumeIndex: index,
+      awaitingSince: new Date().toISOString(),
+      activity: null,
+      thought: null,
+    });
+
+    // 期限到来で未回答を skip して同 index を再開する（破綻させない）。
+    await this.schedule(HITL_TIMEOUT_SEC, "hitlTimeout", {
+      index,
+      ids: newQuestions.map((q) => q.id),
+    });
+  }
+
   @callable()
   async answerQuestion(id: string, answer: string): Promise<void> {
-    const questions = this.state.questions.map(
-      (q): HitlQuestion => (q.id === id ? { ...q, answer, status: "answered" } : q),
-    );
+    const questions = answerInList(this.state.questions, id, answer);
     this.setState({ ...this.state, questions });
+    await this.maybeResume(questions);
+  }
+
+  @callable()
+  async skipQuestion(id: string): Promise<void> {
+    const questions = skipInList(this.state.questions, id);
+    this.setState({ ...this.state, questions });
+    await this.maybeResume(questions);
+  }
+
+  /** タイムアウト発火時、未回答の対象質問を skip して再開を試みる。 */
+  async hitlTimeout(payload: { index: number; ids: string[] }): Promise<void> {
+    // 既に再開済み／別ステップへ進んでいれば何もしない（二重再開防止）。
+    if (this.state.phase !== "awaiting_user") return;
+    if (this.state.resumeIndex !== payload.index) return;
+
+    const questions = skipManyInList(this.state.questions, payload.ids);
+    this.setState({ ...this.state, questions });
+    await this.maybeResume(questions);
+  }
+
+  /** pending が無くなったら designing へ戻し、保留中だった runStep(index) を再 schedule する。 */
+  private async maybeResume(questions: HitlQuestion[]): Promise<void> {
+    if (this.state.phase !== "awaiting_user") return;
+    if (hasPending(questions)) return; // まだ未回答が残る
+
+    const index = this.state.resumeIndex;
+    this.setState({
+      ...this.state,
+      phase: "designing",
+      resumeIndex: null,
+      awaitingSince: null,
+    });
+
+    if (index !== null) {
+      await this.schedule(STEP_DELAY_SEC, "runStep", { index }, { retry: { maxAttempts: 3 } });
+    }
   }
 
   onError(connectionOrError: unknown, maybeError?: unknown): void {

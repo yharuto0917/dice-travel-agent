@@ -15,6 +15,11 @@ export type Bindings = {
   /** AI Gateway 経由で Gemini を呼ぶためのアカウントID / ゲートウェイ名（#14） */
   AI_GATEWAY_ACCOUNT_ID: string;
   AI_GATEWAY_NAME: string;
+  /**
+   * AI Gateway 認証トークン（Cloudflare API トークン, secret 管理）。
+   * 認証必須 Gateway を通すため `cf-aig-authorization: Bearer <token>` として併送する（#14）。
+   */
+  AI_GATEWAY_TOKEN?: string;
   /** 匿名クライアント識別 Cookie の署名用シークレット（secret 管理, #6） */
   COOKIE_SECRET: string;
   /** CORS 許可オリジン（フロント本番URL）。未設定時は開発用オリジンのみ許可（#6） */
@@ -30,6 +35,7 @@ export type Bindings = {
   GOOGLE_MAPS_API_KEY?: string;
   PEXELS_API_KEY?: string;
   ODPT_API_KEY?: string;
+  /** Google AI Studio APIキー（パススルー方式の Gemini モデル認証, secret 管理, #14） */
   GEMINI_API_KEY?: string;
 };
 

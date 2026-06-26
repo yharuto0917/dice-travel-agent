@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowRight, CheckCircle, Sparkle, WarningCircle } from "@phosphor-icons/react";
-import type { AgentState } from "@repo/shared";
+import type { AgentState, TimelineEvent } from "@repo/shared";
 import { useAgent } from "agents/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -14,6 +14,7 @@ import {
   PHASE_LABELS,
   PLAN_ITEM_LABELS,
   SECTION_LABELS,
+  TIMELINE_KIND_ICON,
   TRAVEL_AGENT_NAME,
 } from "@/lib/agent";
 import { FLOW_STEPS } from "@/lib/flow";
@@ -24,6 +25,8 @@ const STEP_INDEX = 3; // 計画作成中（4ステップ目）
 function GeneratingInner({ planId }: { planId: string }) {
   // Agent の state は onStateUpdate で受け取り、ローカルに反映して再描画する。
   const [state, setState] = useState<AgentState | null>(null);
+  // 思考要約は既定で折りたたみ、クリックで全文展開する（#47 Thinking 表示改善）。
+  const [thoughtOpen, setThoughtOpen] = useState(false);
   const startedRef = useRef(false);
 
   const agent = useAgent<AgentState>({
@@ -120,11 +123,26 @@ function GeneratingInner({ planId }: { planId: string }) {
                   <span className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
                   <span className="truncate">{state.activity}</span>
                 </div>
-                {/* 思考中の要約テキスト（Gemini reasoning）を流し込む */}
+                {/* 思考中の要約テキスト（Gemini reasoning）。クリックで全文を展開／折りたたむ。 */}
                 {state.thought ? (
-                  <p className="line-clamp-3 rounded-xl bg-surface-2/60 px-3 py-2 text-[0.7rem] leading-relaxed text-muted/90">
-                    {state.thought}
-                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setThoughtOpen((v) => !v)}
+                    className="text-left"
+                    aria-expanded={thoughtOpen}
+                  >
+                    <p
+                      className={cn(
+                        "rounded-xl bg-surface-2/60 px-3 py-2 text-[0.7rem] leading-relaxed text-muted/90",
+                        thoughtOpen ? "" : "line-clamp-3",
+                      )}
+                    >
+                      {state.thought}
+                    </p>
+                    <span className="mt-1 inline-block text-[0.65rem] font-bold text-primary/80">
+                      {thoughtOpen ? "折りたたむ" : "思考の続きを見る"}
+                    </span>
+                  </button>
                 ) : null}
               </div>
             ) : null}
@@ -145,6 +163,9 @@ function GeneratingInner({ planId }: { planId: string }) {
             ) : null}
           </CardBody>
         </Card>
+
+        {/* 実行履歴タイムライン（#47 可観測性）。生成中も完了後も「何をしたか」を振り返れる。 */}
+        {state && state.timeline.length > 0 ? <Timeline events={state.timeline} /> : null}
 
         {/* HITL: 確認待ちの質問（#13 は足場。通常フローでは表示されない） */}
         {pendingQuestions.length > 0 ? (
@@ -190,6 +211,94 @@ function GeneratingInner({ planId }: { planId: string }) {
         </div>
       </div>
     </AppShell>
+  );
+}
+
+/** start/done を groupId でまとめた表示用の1行。 */
+type TimelineRow = {
+  key: string;
+  kind: TimelineEvent["kind"];
+  label: string;
+  status: TimelineEvent["status"];
+  detail: string | null;
+  dayNumber: number | null;
+};
+
+/**
+ * 履歴イベントを groupId でまとめる。同一 groupId の start→done は1行に集約し、
+ * 最後に来た状態（done/error）で上書きする。groupId が無い単発イベントは id をキーに1行。
+ */
+function buildRows(events: TimelineEvent[]): TimelineRow[] {
+  const rows = new Map<string, TimelineRow>();
+  const order: string[] = [];
+  for (const e of events) {
+    const key = e.groupId ?? e.id;
+    const existing = rows.get(key);
+    if (existing) {
+      existing.status = e.status;
+      existing.label = e.label;
+      if (e.detail) existing.detail = e.detail;
+    } else {
+      rows.set(key, {
+        key,
+        kind: e.kind,
+        label: e.label,
+        status: e.status,
+        detail: e.detail,
+        dayNumber: e.dayNumber,
+      });
+      order.push(key);
+    }
+  }
+  return order.map((k) => rows.get(k) as TimelineRow);
+}
+
+/** 実行履歴タイムライン。ツール・サブエージェント・フェーズ・確認の流れを時系列で表示する。 */
+function Timeline({ events }: { events: TimelineEvent[] }) {
+  const rows = buildRows(events);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 新しいイベントが来たら末尾（最新）へ自動スクロールする。
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && events.length > 0) el.scrollTop = el.scrollHeight;
+  }, [events.length]);
+
+  return (
+    <Card className="mt-4">
+      <CardBody className="flex flex-col gap-2">
+        <p className="text-xs font-extrabold tracking-wide text-muted">実行履歴</p>
+        <div ref={scrollRef} className="flex max-h-64 flex-col gap-1.5 overflow-y-auto pr-1">
+          {rows.map((row) => (
+            <div key={row.key} className="flex items-start gap-2 text-xs">
+              <span className="mt-0.5 shrink-0 leading-none">{TIMELINE_KIND_ICON[row.kind]}</span>
+              <span className="mt-0.5 shrink-0">
+                {row.status === "start" ? (
+                  <span className="inline-flex h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                ) : row.status === "error" ? (
+                  <WarningCircle size={13} weight="fill" className="text-red-500" />
+                ) : (
+                  <CheckCircle size={13} weight="fill" className="text-primary" />
+                )}
+              </span>
+              <div className="min-w-0">
+                <p className="font-bold text-foreground/90">
+                  {row.dayNumber ? (
+                    <span className="mr-1 text-muted">[{row.dayNumber}日目]</span>
+                  ) : null}
+                  {row.label}
+                </p>
+                {row.detail ? (
+                  <p className="line-clamp-2 text-[0.68rem] leading-relaxed text-muted/80">
+                    {row.detail}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      </CardBody>
+    </Card>
   );
 }
 

@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { createUsageCounter } from "../flow/judgement";
+import { createUsageCounter, MAX_HITL_QUESTIONS } from "../flow/judgement";
 import type { ToolContext } from "./context";
-import { buildHumanInTheLoop, HITL_PENDING } from "./human-in-the-loop";
+import { buildHumanInTheLoop, HITL_LIMIT_REACHED, HITL_PENDING } from "./human-in-the-loop";
 
-function makeCtx(): ToolContext {
+function makeCtx(askedCount = 0): ToolContext {
   return {
     clients: {} as ToolContext["clients"],
     destPoint: null,
     conditions: {},
     usage: createUsageCounter(),
-    hitl: { pending: [], answers: {} },
+    hitl: { pending: [], answers: {}, askedCount },
   };
 }
 
@@ -18,7 +18,7 @@ type ToolWithExecute = {
   execute: (
     input: { question: string; options?: string[] },
     opts: unknown,
-  ) => Promise<{ status: string; questionId: string }>;
+  ) => Promise<{ status: string; questionId?: string; message?: string }>;
 };
 
 describe("tools/human-in-the-loop", () => {
@@ -37,5 +37,17 @@ describe("tools/human-in-the-loop", () => {
     });
     expect(result.questionId).toBe(ctx.hitl.pending[0]?.id);
     expect(ctx.usage.toolCalls).toBe(1);
+  });
+
+  it("上限に達していると質問を積まず HITL_LIMIT_REACHED を返す", async () => {
+    // すでに上限ぶん質問済みの状態。
+    const ctx = makeCtx(MAX_HITL_QUESTIONS);
+    const t = buildHumanInTheLoop(ctx) as unknown as ToolWithExecute;
+
+    const result = await t.execute({ question: "もう一つ質問" }, {});
+
+    expect(result.status).toBe(HITL_LIMIT_REACHED);
+    expect(ctx.hitl.pending).toHaveLength(0); // 積まれない
+    expect(ctx.usage.toolCalls).toBe(0); // カウントもしない
   });
 });

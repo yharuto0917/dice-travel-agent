@@ -4,6 +4,7 @@ import {
   type GeoPoint,
   type HitlQuestion,
   prefectureCentroid,
+  type TimelineEvent,
   type TravelPlanDraft,
 } from "@repo/shared";
 import { Agent, callable } from "agents";
@@ -14,7 +15,7 @@ import { type PlanRow, plans, planVersions } from "../db/schema";
 import type { Bindings } from "../env";
 import { createUsageCounter, HITL_TIMEOUT_SEC } from "./flow/judgement";
 import { dayCountOf, mergeDay, nightsOf } from "./flow/merge";
-import { runDay } from "./flow/orchestrator";
+import { runDay, type TimelineInput } from "./flow/orchestrator";
 import { buildStepPlan } from "./flow/step-plan";
 import {
   answeredMap,
@@ -31,6 +32,9 @@ import { fillEmptyDays, fixPlan } from "./validation/fix";
 
 /** ステップ間の待ち（秒）。進行をクライアントで可視化するための小さな間隔。 */
 const STEP_DELAY_SEC = 1;
+
+/** 実行履歴タイムラインの保持上限。DO state は全同期されるため、古い順に間引いて肥大を防ぐ。 */
+const TIMELINE_MAX = 200;
 
 export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
   initialState: AgentState = AgentStateSchema.parse({});
@@ -52,7 +56,15 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
       return;
     }
 
-    this.setState({ ...this.state, phase: "understanding", progress: 0, error: null });
+    // 新規生成のたびに履歴を初期化し、開始イベントを1件積む（再開時の重複を避ける）。
+    this.setState({
+      ...this.state,
+      phase: "understanding",
+      progress: 0,
+      error: null,
+      timeline: [],
+    });
+    this.pushTimeline({ kind: "phase", label: "プラン生成を開始しました" });
     await this.schedule(0, "runStep", { index: 0 });
   }
 
@@ -135,6 +147,10 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
         filledSections: [...new Set([...this.state.filledSections, "conditions"])],
         progress: (index + 1) / steps.length,
       });
+      this.pushTimeline({
+        kind: "phase",
+        label: `${row.destinationPref || "目的地"}の条件を整理しました（${nights === 0 ? "日帰り" : `${nights}泊${dayCount}日`}）`,
+      });
     } else if (step.type === "planDay") {
       const n = step.dayNumber;
 
@@ -147,12 +163,34 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
         conditions: row.conditions || {},
         usage: createUsageCounter(),
         // 再開時、既回答の HITL Q&A をプロンプトへ反映し同じ質問の再発行を防ぐ。
-        hitl: { pending: [], answers: answeredMap(this.state.questions) },
+        // askedCount は過去に提示済みの質問総数。humanInTheLoop の上限判定に使う（#47）。
+        hitl: {
+          pending: [],
+          answers: answeredMap(this.state.questions),
+          askedCount: this.state.questions.length,
+        },
       };
 
-      // ストリーミングの実行状況・思考要約を activity / thought に反映する。
-      const result = await runDay(this.env, ctx, plan, n, (status, thought) =>
-        this.setActivity(status, thought ?? null),
+      // 当日の生成開始を履歴へ（同 groupId の done と対にして所要が分かるようにする）。
+      this.pushTimeline(
+        {
+          kind: "phase",
+          label: `${n}日目の計画を作成しています`,
+          status: "start",
+          groupId: `day-${n}`,
+        },
+        n,
+      );
+
+      // ストリーミングの実行状況・思考要約を activity / thought に反映し、
+      // ツール／サブエージェントの開始・完了を timeline（当日番号付き）へ追記する。
+      const result = await runDay(
+        this.env,
+        ctx,
+        plan,
+        n,
+        (status, thought) => this.setActivity(status, thought ?? null),
+        (ev) => this.pushTimeline(ev, n),
       );
 
       // 計画担当が humanInTheLoop を呼んだら、当日を確定せず回答待ちで保留する。
@@ -172,6 +210,15 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
         activity: null, // 当日完了。次ステップ開始までクリア。
         thought: null,
       });
+      this.pushTimeline(
+        {
+          kind: "phase",
+          label: `${n}日目の計画ができました（予定 ${result.day.items.length} 件）`,
+          status: "done",
+          groupId: `day-${n}`,
+        },
+        n,
+      );
     } else if (step.type === "finalize") {
       await this.finalizePlan(plan, row);
       // 永続化まで完了したのでここで終了（次 step は schedule しない）。
@@ -193,6 +240,12 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
    */
   private async finalizePlan(plan: TravelPlanDraft, row: PlanRow): Promise<void> {
     this.setActivity("計画を検証・保存しています…");
+    this.pushTimeline({
+      kind: "phase",
+      label: "計画を検証・保存しています",
+      status: "start",
+      groupId: "finalize",
+    });
     const destPoint = await this.loadDestPoint(createClients(this.env), row.destinationPref);
 
     // 行き先は確定済み（行に prefectureCode あり）なら必ず destination を構成する。
@@ -268,6 +321,12 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
       activity: null,
       thought: null,
     });
+    this.pushTimeline({
+      kind: "phase",
+      label: "プランが完成しました",
+      status: "done",
+      groupId: "finalize",
+    });
   }
 
   /**
@@ -277,6 +336,25 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
   private setActivity(status: string, thought: string | null = null): void {
     if (this.state.activity === status && this.state.thought === thought) return;
     this.setState({ ...this.state, activity: status, thought });
+  }
+
+  /**
+   * 実行履歴イベントを timeline へ追記する（#47 可観測性）。id/時刻/日番号を付与し、
+   * 古い順に上限件数へ丸めてから setState する。activity（最新の一行）と違い履歴として残る。
+   */
+  private pushTimeline(input: TimelineInput, dayNumber: number | null = null): void {
+    const event: TimelineEvent = {
+      id: crypto.randomUUID(),
+      kind: input.kind,
+      label: input.label,
+      status: input.status ?? "done",
+      groupId: input.groupId ?? null,
+      detail: input.detail ?? null,
+      dayNumber,
+      at: new Date().toISOString(),
+    };
+    const timeline = [...this.state.timeline, event].slice(-TIMELINE_MAX);
+    this.setState({ ...this.state, timeline });
   }
 
   /** 完成計画を D1 に保存。上書き前に旧版を plan_versions へスナップショットする（#16）。 */
@@ -326,6 +404,17 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
       thought: null,
     });
 
+    // 確認待ちに入ったことを履歴へ。質問文を detail に載せ、後から何を聞かれたか追える。
+    for (const q of newQuestions) {
+      this.pushTimeline({
+        kind: "hitl",
+        label: "確認をお願いしています",
+        status: "start",
+        groupId: `hitl-${q.id}`,
+        detail: q.question,
+      });
+    }
+
     // 期限到来で未回答を skip して同 index を再開する（破綻させない）。
     await this.schedule(HITL_TIMEOUT_SEC, "hitlTimeout", {
       index,
@@ -337,6 +426,13 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
   async answerQuestion(id: string, answer: string): Promise<void> {
     const questions = answerInList(this.state.questions, id, answer);
     this.setState({ ...this.state, questions });
+    this.pushTimeline({
+      kind: "hitl",
+      label: "回答を受け取りました",
+      status: "done",
+      groupId: `hitl-${id}`,
+      detail: answer,
+    });
     await this.maybeResume(questions);
   }
 
@@ -344,6 +440,12 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
   async skipQuestion(id: string): Promise<void> {
     const questions = skipInList(this.state.questions, id);
     this.setState({ ...this.state, questions });
+    this.pushTimeline({
+      kind: "hitl",
+      label: "確認をスキップしました",
+      status: "done",
+      groupId: `hitl-${id}`,
+    });
     await this.maybeResume(questions);
   }
 

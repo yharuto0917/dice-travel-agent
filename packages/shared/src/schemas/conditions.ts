@@ -2,6 +2,8 @@ import { z } from "zod";
 
 /** 旅行条件入力（テーマ・予算感・カスタマイズ） */
 export const TripConditionsSchema = z.object({
+  /** 出発地（都道府県・市区町村・駅名など）。必須。初日の移動の起点に使う。 */
+  origin: z.string().min(1, "出発地を入力してください"),
   /** テーマ（温泉/グルメ/自然/歴史 など。自由記述含む） */
   themes: z.array(z.string()).default([]),
   /** 1人あたりの予算範囲（円） [min, max] */

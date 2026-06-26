@@ -23,6 +23,7 @@ function draft(days: PlanDay[]): TravelPlanDraft {
     summary: "テスト",
     nights: 1,
     conditions: {
+      origin: "東京駅",
       themes: [],
       budgetRange: [0, 50000],
       nights: 1,

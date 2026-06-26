@@ -244,7 +244,7 @@ export async function runDay(
       flushThinking();
       reasoningSeq += 1;
       reasoningId = `think-${reasoningSeq}`;
-      onActivity?.("思考しています…", "");
+      onActivity?.("思考しています…");
       onEvent?.({
         kind: "thinking",
         label: "思考しています",
@@ -255,7 +255,15 @@ export async function runDay(
       reasoningBuf += part.text;
       if (reasoningBuf.length - emittedLen >= 40) {
         emittedLen = reasoningBuf.length;
-        onActivity?.("思考しています…", reasoningTail(reasoningBuf));
+        // 生成中の思考を、同 groupId の行へ逐次反映する（履歴上でライブに見える）。
+        // 末尾だけ（reasoningTail）を detail に載せ、確定時に全文へ差し替える。
+        onEvent?.({
+          kind: "thinking",
+          label: "思考しています",
+          status: "start",
+          groupId: reasoningId,
+          detail: reasoningTail(reasoningBuf),
+        });
       }
     } else if (part.type === "reasoning-end") {
       flushThinking();

@@ -14,6 +14,7 @@ function validPlan(): TravelPlan {
       tags: [],
     },
     conditions: {
+      origin: "東京駅",
       themes: ["観光"],
       budgetRange: [0, 50000],
       nights: 1,

@@ -65,9 +65,13 @@ describe("DiceStateSchema", () => {
 
 describe("TripConditionsSchema", () => {
   it("既定値が正しく設定される", () => {
-    const conditions = TripConditionsSchema.parse({});
+    const conditions = TripConditionsSchema.parse({ origin: "東京駅" });
     expect(conditions.nights).toBe(1);
     expect(conditions.budgetRange).toEqual([0, 100000]);
+  });
+
+  it("出発地（origin）は必須", () => {
+    expect(() => TripConditionsSchema.parse({})).toThrow();
   });
 });
 
@@ -76,7 +80,7 @@ describe("TravelPlanSchema", () => {
     const plan = TravelPlanSchema.parse({
       id: "p1",
       destination: candidate("c1"),
-      conditions: {},
+      conditions: { origin: "東京駅" },
       title: "東京ミニ旅",
       summary: "日帰りで巡るミニチュアの東京",
       nights: 0,

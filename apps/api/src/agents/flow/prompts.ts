@@ -67,9 +67,17 @@ export function dayPlannerPrompt(
           .join("\n")}\n`
       : "";
 
+  const origin = ctx.conditions.origin?.trim() || "（未指定）";
+  // 初日は出発地からの移動を起点にする旨を明示する（2日目以降は前日からの続き）。
+  const originRule =
+    dayNumber === 1
+      ? `- 初日です。最初の予定は「出発地（${origin}）」から目的地エリアへの移動にし、現実的な交通手段・所要時間で組むこと。`
+      : `- 出発地は「${origin}」。最終日は出発地へ戻ることも考慮すること。`;
+
   return `${dayNumber}日目の計画を作成してください（全${
     plan.nights !== undefined ? plan.nights + 1 : "?"
   }日中）。
+出発地: ${origin}
 タイトル: ${plan.title || ""}
 概要: ${plan.summary || ""}
 目的地の座標: ${
@@ -84,7 +92,8 @@ ${answeredBlock}
 これまでに確定した日程（前日までの内容）:
 ${priorDaysSummary(plan, dayNumber)}
 
-【日跨ぎの整合性ルール】
+【移動・日跨ぎの整合性ルール】
+${originRule}
 - 上記で訪問済みのスポット・飲食店は再訪・重複させないこと（別の場所を選ぶ）。
 - 前日の最終地点・宿泊地から自然につながる動線にし、非現実的な往復を避けること。
 - 旅行全体の予算（条件の budgetRange）を意識し、前日までの消費を踏まえて当日の費用を配分すること。

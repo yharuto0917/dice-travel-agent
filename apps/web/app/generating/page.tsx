@@ -25,8 +25,6 @@ const STEP_INDEX = 3; // 計画作成中（4ステップ目）
 function GeneratingInner({ planId }: { planId: string }) {
   // Agent の state は onStateUpdate で受け取り、ローカルに反映して再描画する。
   const [state, setState] = useState<AgentState | null>(null);
-  // 思考要約は既定で折りたたみ、クリックで全文展開する（#47 Thinking 表示改善）。
-  const [thoughtOpen, setThoughtOpen] = useState(false);
   const startedRef = useRef(false);
 
   const agent = useAgent<AgentState>({
@@ -116,34 +114,11 @@ function GeneratingInner({ planId }: { planId: string }) {
               />
             </div>
 
-            {/* ストリーミング中の実行状況（思考・ツール実行）をライブ表示 */}
+            {/* 現在の実行状況（一行）。思考の途中経過も含む詳細は下の実行履歴に流れる。 */}
             {!isDone && !isError && state?.activity ? (
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center gap-2 text-xs font-bold text-muted">
-                  <span className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
-                  <span className="truncate">{state.activity}</span>
-                </div>
-                {/* 思考中の要約テキスト（Gemini reasoning）。クリックで全文を展開／折りたたむ。 */}
-                {state.thought ? (
-                  <button
-                    type="button"
-                    onClick={() => setThoughtOpen((v) => !v)}
-                    className="text-left"
-                    aria-expanded={thoughtOpen}
-                  >
-                    <p
-                      className={cn(
-                        "rounded-xl bg-surface-2/60 px-3 py-2 text-[0.7rem] leading-relaxed text-muted/90",
-                        thoughtOpen ? "" : "line-clamp-3",
-                      )}
-                    >
-                      {state.thought}
-                    </p>
-                    <span className="mt-1 inline-block text-[0.65rem] font-bold text-primary/80">
-                      {thoughtOpen ? "折りたたむ" : "思考の続きを見る"}
-                    </span>
-                  </button>
-                ) : null}
+              <div className="flex items-center gap-2 text-xs font-bold text-muted">
+                <span className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+                <span className="truncate">{state.activity}</span>
               </div>
             ) : null}
 
@@ -283,12 +258,16 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
           {rows.map((row) => {
             const hasDetail = !!row.detail;
             const isOpen = openKeys.has(row.key);
+            // 進行中の思考はライブ表示（detail を即表示、トグル不要）。
+            const isLive = row.kind === "thinking" && row.status === "start" && hasDetail;
             return (
               <div key={row.key} className="flex items-start gap-2 text-xs">
                 <span className="mt-0.5 shrink-0 leading-none">{TIMELINE_KIND_ICON[row.kind]}</span>
-                <span className="mt-0.5 shrink-0">
+                {/* ステータス印は 13px 角の枠に揃える。進行中のドットは小さいので枠の中央に
+                    置き、完了/失敗アイコン（13px）と中心位置を一致させる（ズレ防止）。 */}
+                <span className="mt-0.5 flex h-[13px] w-[13px] shrink-0 items-center justify-center">
                   {row.status === "start" ? (
-                    <span className="inline-flex h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
                   ) : row.status === "error" ? (
                     <WarningCircle size={13} weight="fill" className="text-red-500" />
                   ) : (
@@ -296,8 +275,9 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
                   )}
                 </span>
                 <div className="min-w-0 flex-1">
-                  {/* detail があれば行全体をトグルにして、終わった思考などを開いて読めるようにする。 */}
-                  {hasDetail ? (
+                  {/* 生成中の思考は detail をライブ表示（クリック不要）。終わった思考・サブ
+                      エージェント結果は detail をトグルで開閉する。 */}
+                  {hasDetail && !isLive ? (
                     <button
                       type="button"
                       onClick={() => toggle(row.key)}
@@ -322,8 +302,14 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
                       {row.label}
                     </p>
                   )}
-                  {hasDetail && isOpen ? (
-                    <p className="mt-1 whitespace-pre-wrap rounded-lg bg-surface-2/60 px-2.5 py-1.5 text-[0.68rem] leading-relaxed text-muted/90">
+                  {/* ライブ思考は末尾を流し込み（line-clamp）、確定済みは展開時に全文表示。 */}
+                  {row.detail && (isLive || isOpen) ? (
+                    <p
+                      className={cn(
+                        "mt-1 rounded-lg bg-surface-2/60 px-2.5 py-1.5 text-[0.68rem] leading-relaxed text-muted/90",
+                        isLive ? "line-clamp-3" : "whitespace-pre-wrap",
+                      )}
+                    >
                       {row.detail}
                     </p>
                   ) : null}
@@ -392,11 +378,18 @@ function HitlQuestionCard({
   return (
     <Card>
       <CardBody className="flex flex-col gap-3">
-        <p className="text-sm font-bold">{question}</p>
+        <p className="text-sm font-bold break-words">{question}</p>
         {options && options.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {options.map((opt) => (
-              <Button key={opt} size="sm" variant="outline" onClick={() => onAnswer(opt)}>
+              <Button
+                key={opt}
+                size="sm"
+                variant="outline"
+                onClick={() => onAnswer(opt)}
+                // 長い選択肢でもカード幅を超えないよう、固定高さを解いて折り返す。
+                className="h-auto max-w-full whitespace-normal py-1.5 text-left break-words"
+              >
                 {opt}
               </Button>
             ))}
@@ -407,10 +400,15 @@ function HitlQuestionCard({
               type="text"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              className="flex-1 rounded-xl border bg-surface-2 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              // min-w-0 が無いと flex-1 の入力欄が縮まず、長い入力で回答ボタンを押し出す。
+              className="min-w-0 flex-1 rounded-xl border bg-surface-2 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
               placeholder="回答を入力"
             />
-            <Button size="sm" onClick={() => text.trim() && onAnswer(text.trim())}>
+            <Button
+              size="sm"
+              className="shrink-0"
+              onClick={() => text.trim() && onAnswer(text.trim())}
+            >
               回答
             </Button>
           </div>

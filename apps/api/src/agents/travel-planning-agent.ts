@@ -339,17 +339,40 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
   }
 
   /**
-   * 実行履歴イベントを timeline へ追記する（#47 可観測性）。id/時刻/日番号を付与し、
-   * 古い順に上限件数へ丸めてから setState する。activity（最新の一行）と違い履歴として残る。
+   * 実行履歴イベントを timeline へ反映する（#47 可観測性）。
+   *
+   * groupId を持つイベントは同 groupId の既存行を**インプレース更新**する。これにより
+   * start → 途中経過(思考の逐次更新) → done を1行に保ち、生成中の思考もそのまま履歴に
+   * 流し込める（配列の肥大も防げる）。groupId が無いイベントは1件ずつ追記する。
+   * groupId は当日番号で名前空間化する（orchestrator は日をまたいで "think-1" 等を
+   * 再採番するため、前置しないと別日のイベントが衝突する）。
    */
   private pushTimeline(input: TimelineInput, dayNumber: number | null = null): void {
-    // groupId は当日番号で名前空間化する。orchestrator は日をまたいで同じ groupId
-    // （例: "think-1"）を再採番するため、前置しないと別日の start/done が衝突する。
     const groupId = input.groupId
       ? dayNumber != null
         ? `d${dayNumber}:${input.groupId}`
         : input.groupId
       : null;
+    const now = new Date().toISOString();
+    const timeline = [...this.state.timeline];
+
+    if (groupId) {
+      const idx = timeline.findIndex((e) => e.groupId === groupId);
+      const prev = idx >= 0 ? timeline[idx] : undefined;
+      if (prev) {
+        timeline[idx] = {
+          ...prev,
+          label: input.label,
+          status: input.status ?? prev.status,
+          // detail は与えられた時だけ更新（done で null が来ても途中経過を消さない）。
+          detail: input.detail ?? prev.detail,
+          at: now,
+        };
+        this.setState({ ...this.state, timeline });
+        return;
+      }
+    }
+
     const event: TimelineEvent = {
       id: crypto.randomUUID(),
       kind: input.kind,
@@ -358,10 +381,10 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
       groupId,
       detail: input.detail ?? null,
       dayNumber,
-      at: new Date().toISOString(),
+      at: now,
     };
-    const timeline = [...this.state.timeline, event].slice(-TIMELINE_MAX);
-    this.setState({ ...this.state, timeline });
+    timeline.push(event);
+    this.setState({ ...this.state, timeline: timeline.slice(-TIMELINE_MAX) });
   }
 
   /** 完成計画を D1 に保存。上書き前に旧版を plan_versions へスナップショットする（#16）。 */

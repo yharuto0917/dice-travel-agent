@@ -6,6 +6,7 @@ import { useAgent } from "agents/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState } from "react";
+import { Streamdown } from "streamdown";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
@@ -302,16 +303,31 @@ function Timeline({ events }: { events: TimelineEvent[] }) {
                       {row.label}
                     </p>
                   )}
-                  {/* ライブ思考は末尾を流し込み（line-clamp）、確定済みは展開時に全文表示。 */}
+                  {/* ライブ思考は流れ込むストリームを Streamdown で Markdown 整形（未完の
+                      ブロックも崩れず描画）。ライブ中は高さを抑えて末尾まで流し込み、確定済みは
+                      展開時に全文表示する。 */}
                   {row.detail && (isLive || isOpen) ? (
-                    <p
+                    <div
                       className={cn(
                         "mt-1 rounded-lg bg-surface-2/60 px-2.5 py-1.5 text-[0.68rem] leading-relaxed text-muted/90",
-                        isLive ? "line-clamp-3" : "whitespace-pre-wrap",
+                        isLive ? "max-h-16 overflow-hidden" : null,
                       )}
                     >
-                      {row.detail}
-                    </p>
+                      <Streamdown
+                        parseIncompleteMarkdown={isLive}
+                        className={cn(
+                          // 小さな思考ボックス向けにブロック間マージンを詰めて密度を上げる。
+                          "[&_:first-child]:mt-0 [&_:last-child]:mb-0",
+                          "[&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5",
+                          "[&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4",
+                          "[&_h1]:my-1 [&_h2]:my-1 [&_h3]:my-1 [&_h1]:text-[0.75rem] [&_h2]:text-[0.72rem] [&_h3]:text-[0.7rem] [&_:is(h1,h2,h3)]:font-bold",
+                          "[&_code]:rounded [&_code]:bg-surface-2 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.64rem]",
+                          "[&_a]:text-primary [&_a]:underline [&_strong]:font-bold",
+                        )}
+                      >
+                        {row.detail}
+                      </Streamdown>
+                    </div>
                   ) : null}
                 </div>
               </div>

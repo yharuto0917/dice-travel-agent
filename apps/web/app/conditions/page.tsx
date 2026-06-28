@@ -1,21 +1,35 @@
 "use client";
 
 import { Minus, Plus, SlidersHorizontal } from "@phosphor-icons/react";
-import { useMutation } from "@tanstack/react-query";
+import type { RateLimitStatus } from "@repo/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/app-shell";
+import { TurnstileWidget } from "@/components/turnstile-widget";
 import { Button } from "@/components/ui/button";
-import { createPlan } from "@/lib/api";
+import { createPlan, getRateLimits, RateLimitError, TurnstileError } from "@/lib/api";
 import { FLOW_STEPS } from "@/lib/flow";
 import { useDiceStore } from "@/lib/stores/diceStore";
 import { cn } from "@/lib/utils";
+
+/** resetAt（ISO）を「6/29 0:00」のような JST の短い表記にする。 */
+function formatResetAt(resetAt: string): string {
+  return new Date(resetAt).toLocaleString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 const THEME_OPTIONS = ["温泉", "グルメ", "自然", "絶景", "歴史・文化", "アクティビティ"];
 const TRANSPORT_OPTIONS = ["公共交通機関", "レンタカー", "新幹線", "飛行機", "徒歩多め"];
 
 export default function ConditionsPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { candidates, confirmedCandidateId } = useDiceStore();
 
   const [origin, setOrigin] = useState("");
@@ -30,6 +44,27 @@ export default function ConditionsPage() {
 
   const destination = candidates.find((c) => c.id === confirmedCandidateId);
 
+  // 当日の計画作成の残回数（#17）。超過時の案内・ボタン無効化に使う。
+  const rateLimitQuery = useQuery({
+    queryKey: ["rate-limits"],
+    queryFn: getRateLimits,
+  });
+  const planLimit = rateLimitQuery.data?.plan;
+  // 429 で返ったレート制限状況（残回数・次回可能時刻）。
+  const [limitExceeded, setLimitExceeded] = useState<RateLimitStatus | null>(null);
+  // Turnstile（#49）の人間性検証トークン。取得できるまで生成は不可。失敗時はエラー文言。
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileError, setTurnstileError] = useState<string | null>(null);
+  // 送信のたびにサーバ側でトークンが消費されるため、失敗後はこのシグナルでウィジェットを
+  // reset し、新しいトークンを取り直す（ページ再読み込みなしで再試行できるようにする）。
+  const [turnstileResetSignal, setTurnstileResetSignal] = useState(0);
+
+  const handleTurnstileVerify = useCallback((token: string) => {
+    setTurnstileToken(token);
+    setTurnstileError(null);
+  }, []);
+  const handleTurnstileExpire = useCallback(() => setTurnstileToken(null), []);
+
   useEffect(() => {
     if (!destination) {
       router.replace("/destination");
@@ -37,6 +72,18 @@ export default function ConditionsPage() {
   }, [destination, router]);
 
   const createPlanMutation = useMutation({
+    onError: (error) => {
+      setLimitExceeded(error instanceof RateLimitError ? error.status : null);
+      setTurnstileError(error instanceof TurnstileError ? error.message : null);
+      // 送信時にサーバ側で Turnstile トークンは消費済みのため、失敗種別を問わず破棄し、
+      // ウィジェットを reset して新しいトークンを取り直す（再読み込みなしで再試行可能にする）。
+      setTurnstileToken(null);
+      setTurnstileResetSignal((n) => n + 1);
+      // 429 のときは残回数が変わっているので残回数表示・ボタン無効化判定を最新化する。
+      if (error instanceof RateLimitError) {
+        queryClient.invalidateQueries({ queryKey: ["rate-limits"] });
+      }
+    },
     mutationFn: async () => {
       if (!destination) throw new Error("Destination is not set");
       const allThemes = customTheme.trim() ? [...themes, customTheme.trim()] : themes;
@@ -44,19 +91,22 @@ export default function ConditionsPage() {
         ? [...transports, customTransport.trim()]
         : transports;
 
-      return createPlan({
-        destinationPrefCode: destination.prefectureCode,
-        destinationPref: destination.prefecture,
-        conditions: {
-          origin: origin.trim(),
-          themes: allThemes,
-          budgetRange,
-          nights,
-          partySize,
-          transportPreferences: allTransports,
-          customRequests: customRequests.trim() || undefined,
+      return createPlan(
+        {
+          destinationPrefCode: destination.prefectureCode,
+          destinationPref: destination.prefecture,
+          conditions: {
+            origin: origin.trim(),
+            themes: allThemes,
+            budgetRange,
+            nights,
+            partySize,
+            transportPreferences: allTransports,
+            customRequests: customRequests.trim() || undefined,
+          },
         },
-      });
+        turnstileToken,
+      );
     },
     onSuccess: (data) => {
       router.push(`/generating?planId=${data.id}`);
@@ -269,17 +319,54 @@ export default function ConditionsPage() {
           </section>
         </div>
 
-        <div className="mt-10 flex flex-col items-center gap-2">
+        <div className="mt-10 flex flex-col items-center gap-3">
+          {/* ボット対策の人間性検証（#49）。トークン取得まで生成ボタンは無効。 */}
+          <TurnstileWidget
+            className="flex w-full justify-center"
+            onVerify={handleTurnstileVerify}
+            onExpire={handleTurnstileExpire}
+            resetSignal={turnstileResetSignal}
+          />
+          {turnstileError ? (
+            <p className="text-xs font-bold text-red-500 text-center">{turnstileError}</p>
+          ) : null}
+
           <Button
             className="w-full py-6 text-lg font-bold rounded-2xl shadow-lg"
             onClick={() => createPlanMutation.mutate()}
-            disabled={createPlanMutation.isPending || !origin.trim()}
+            disabled={
+              createPlanMutation.isPending ||
+              !origin.trim() ||
+              !turnstileToken ||
+              planLimit?.remaining === 0
+            }
           >
             <SlidersHorizontal size={24} weight="fill" className="mr-2" />
             {createPlanMutation.isPending ? "保存中..." : "この条件で計画を作る"}
           </Button>
+
+          {/* レート制限の残回数・超過案内（#17） */}
+          {limitExceeded ? (
+            <p className="text-xs font-bold text-red-500 text-center">
+              本日の計画作成（{limitExceeded.limit}回/日）の上限に達しました。
+              <br />
+              {formatResetAt(limitExceeded.resetAt)} 以降に再度お試しください。
+            </p>
+          ) : planLimit ? (
+            <p className="text-xs font-bold text-muted">
+              本日の計画作成：残り {planLimit.remaining} / {planLimit.limit} 回
+              {planLimit.remaining === 0
+                ? `（${formatResetAt(planLimit.resetAt)} にリセット）`
+                : null}
+            </p>
+          ) : null}
+
           {!origin.trim() ? (
             <p className="text-xs font-bold text-muted">出発地を入力すると計画を作成できます。</p>
+          ) : !turnstileToken && !turnstileError ? (
+            <p className="text-xs font-bold text-muted">
+              ボット対策の確認が完了すると計画を作成できます。
+            </p>
           ) : null}
         </div>
       </div>

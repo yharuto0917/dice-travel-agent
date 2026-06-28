@@ -67,28 +67,40 @@ interface TurnstileWidgetProps {
   onVerify: (token: string) => void;
   /** トークン失効・エラー時（トークンを無効化したいとき）。 */
   onExpire?: () => void;
+  /**
+   * 値が変わるたびにウィジェットを reset し、新しいトークンを取り直す。
+   * トークンは単回使用のため、送信に失敗（消費済み）した後の再試行に使う。
+   * 初期値（0）では何もしない。
+   */
+  resetSignal?: number;
   className?: string;
 }
 
-export function TurnstileWidget({ onVerify, onExpire, className }: TurnstileWidgetProps) {
+export function TurnstileWidget({
+  onVerify,
+  onExpire,
+  resetSignal,
+  className,
+}: TurnstileWidgetProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   // 親の再レンダリングでウィジェットを作り直さないよう、コールバックは ref 経由で参照する。
   const onVerifyRef = useRef(onVerify);
   const onExpireRef = useRef(onExpire);
   onVerifyRef.current = onVerify;
   onExpireRef.current = onExpire;
+  // reset 要求（resetSignal の変化）から参照できるよう、ウィジェットIDを ref で保持する。
+  const widgetIdRef = useRef<string | null>(null);
 
   const [loadFailed, setLoadFailed] = useState(false);
   const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? TEST_SITE_KEY;
 
   useEffect(() => {
     let cancelled = false;
-    let widgetId: string | null = null;
 
     loadTurnstileScript()
       .then(() => {
         if (cancelled || !containerRef.current || !window.turnstile) return;
-        widgetId = window.turnstile.render(containerRef.current, {
+        widgetIdRef.current = window.turnstile.render(containerRef.current, {
           sitekey: siteKey,
           callback: (token) => onVerifyRef.current(token),
           "expired-callback": () => onExpireRef.current?.(),
@@ -103,15 +115,29 @@ export function TurnstileWidget({ onVerify, onExpire, className }: TurnstileWidg
 
     return () => {
       cancelled = true;
-      if (widgetId && window.turnstile) {
+      if (widgetIdRef.current && window.turnstile) {
         try {
-          window.turnstile.remove(widgetId);
+          window.turnstile.remove(widgetIdRef.current);
         } catch {
           // 既に除去済みなどは無視する。
         }
+        widgetIdRef.current = null;
       }
     };
   }, [siteKey]);
+
+  // 親からの reset 要求。消費済みトークンを破棄して新しいチャレンジを発火し、
+  // 成功すれば callback 経由で新しいトークンが onVerify に渡る。
+  useEffect(() => {
+    if (!resetSignal) return; // 初期値（0/未設定）では何もしない。
+    if (widgetIdRef.current && window.turnstile) {
+      try {
+        window.turnstile.reset(widgetIdRef.current);
+      } catch {
+        // 未レンダリング・除去済みなどは無視する。
+      }
+    }
+  }, [resetSignal]);
 
   if (loadFailed) {
     return (

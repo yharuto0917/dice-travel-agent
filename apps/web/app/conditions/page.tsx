@@ -2,7 +2,7 @@
 
 import { Minus, Plus, SlidersHorizontal } from "@phosphor-icons/react";
 import type { RateLimitStatus } from "@repo/shared";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/app-shell";
@@ -29,6 +29,7 @@ const TRANSPORT_OPTIONS = ["公共交通機関", "レンタカー", "新幹線",
 
 export default function ConditionsPage() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { candidates, confirmedCandidateId } = useDiceStore();
 
   const [origin, setOrigin] = useState("");
@@ -54,6 +55,9 @@ export default function ConditionsPage() {
   // Turnstile（#49）の人間性検証トークン。取得できるまで生成は不可。失敗時はエラー文言。
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
   const [turnstileError, setTurnstileError] = useState<string | null>(null);
+  // 送信のたびにサーバ側でトークンが消費されるため、失敗後はこのシグナルでウィジェットを
+  // reset し、新しいトークンを取り直す（ページ再読み込みなしで再試行できるようにする）。
+  const [turnstileResetSignal, setTurnstileResetSignal] = useState(0);
 
   const handleTurnstileVerify = useCallback((token: string) => {
     setTurnstileToken(token);
@@ -71,8 +75,14 @@ export default function ConditionsPage() {
     onError: (error) => {
       setLimitExceeded(error instanceof RateLimitError ? error.status : null);
       setTurnstileError(error instanceof TurnstileError ? error.message : null);
-      // Turnstile はトークンが一度きりのため、拒否されたら無効化して再チャレンジを促す。
-      if (error instanceof TurnstileError) setTurnstileToken(null);
+      // 送信時にサーバ側で Turnstile トークンは消費済みのため、失敗種別を問わず破棄し、
+      // ウィジェットを reset して新しいトークンを取り直す（再読み込みなしで再試行可能にする）。
+      setTurnstileToken(null);
+      setTurnstileResetSignal((n) => n + 1);
+      // 429 のときは残回数が変わっているので残回数表示・ボタン無効化判定を最新化する。
+      if (error instanceof RateLimitError) {
+        queryClient.invalidateQueries({ queryKey: ["rate-limits"] });
+      }
     },
     mutationFn: async () => {
       if (!destination) throw new Error("Destination is not set");
@@ -315,6 +325,7 @@ export default function ConditionsPage() {
             className="flex w-full justify-center"
             onVerify={handleTurnstileVerify}
             onExpire={handleTurnstileExpire}
+            resetSignal={turnstileResetSignal}
           />
           {turnstileError ? (
             <p className="text-xs font-bold text-red-500 text-center">{turnstileError}</p>

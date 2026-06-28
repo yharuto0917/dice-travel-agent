@@ -10,7 +10,8 @@
   },
   "vars": {
     "AI_GATEWAY_ACCOUNT_ID": "86f364979b0a3494e007b930762245cb",
-    "AI_GATEWAY_NAME": "dice-travel-agent"
+    "AI_GATEWAY_NAME": "dice-travel-agent",
+    "WEB_ORIGIN": "https://dice-travel-agent.yharuto.dev"
   },
   "ai": {
     "binding": "AI"

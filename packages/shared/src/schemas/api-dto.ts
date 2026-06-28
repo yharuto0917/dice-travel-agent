@@ -126,3 +126,44 @@ export const RestorePlanRequestSchema = z.object({
   version: z.number().int().min(1),
 });
 export type RestorePlanRequest = z.infer<typeof RestorePlanRequestSchema>;
+
+/** レート制限のスコープ（計画生成 / 常駐チャット, #17）。 */
+export const RateScopeSchema = z.enum(["plan", "chat"]);
+export type RateScope = z.infer<typeof RateScopeSchema>;
+
+/**
+ * 1スコープの当日（JST）レート制限状況（#17）。
+ * `remaining` は残回数（0 未満にはならない）、`resetAt` は次にリセットされる
+ * JST 00:00 の時刻（ISO 文字列, UTC）。超過時 UX の「次回可能時刻」に使う。
+ */
+export const RateLimitStatusSchema = z.object({
+  scope: RateScopeSchema,
+  limit: z.number().int().min(0),
+  used: z.number().int().min(0),
+  remaining: z.number().int().min(0),
+  resetAt: z.string(),
+});
+export type RateLimitStatus = z.infer<typeof RateLimitStatusSchema>;
+
+/** 全スコープのレート制限状況（GET /rate-limits, #17）。 */
+export const RateLimitsResponseSchema = z.object({
+  plan: RateLimitStatusSchema,
+  chat: RateLimitStatusSchema,
+});
+export type RateLimitsResponse = z.infer<typeof RateLimitsResponseSchema>;
+
+/** チャット送信リクエスト（POST /plans/:id/chat, #17/#20）。 */
+export const SendChatMessageRequestSchema = z.object({
+  content: z.string().trim().min(1, "メッセージを入力してください").max(2000),
+});
+export type SendChatMessageRequest = z.infer<typeof SendChatMessageRequestSchema>;
+
+/** チャットメッセージ1件（#20）。 */
+export const ChatMessageSchema = z.object({
+  id: z.string(),
+  planId: z.string(),
+  role: z.enum(["user", "assistant", "system"]),
+  content: z.string(),
+  createdAt: z.string(),
+});
+export type ChatMessage = z.infer<typeof ChatMessageSchema>;

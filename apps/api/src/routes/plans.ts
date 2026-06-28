@@ -1,16 +1,20 @@
 import { zValidator } from "@hono/zod-validator";
 import {
+  type ChatMessage,
   CreatePlanRequestSchema,
   type GetPlanResponse,
   type PlanVersionMeta,
   RestorePlanRequestSchema,
+  SendChatMessageRequestSchema,
 } from "@repo/shared";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { diffPlans } from "../agents/validation/diff";
 import { getDb } from "../db/client";
-import { type PlanRow, plans, planVersions } from "../db/schema";
+import { chatMessages, type PlanRow, plans, planVersions } from "../db/schema";
 import type { AppEnv } from "../env";
+import { consumeRateLimit } from "../lib/rate-limit";
+import { rateLimited } from "../lib/rate-limit-response";
 
 const plansRoute = new Hono<AppEnv>();
 
@@ -46,6 +50,10 @@ plansRoute.post("/", zValidator("json", CreatePlanRequestSchema), async (c) => {
   const db = getDb(c.env);
   const body = c.req.valid("json");
   const clientId = c.get("clientId");
+
+  // 計画生成は Cookie 単位で 2回/日。生成開始時に原子的にカウントし、超過は 429 で拒否する。
+  const limit = await consumeRateLimit(db, clientId, "plan");
+  if (!limit.allowed) return rateLimited(c, limit);
 
   const planId = crypto.randomUUID();
 
@@ -177,6 +185,60 @@ plansRoute.post("/:id/restore", zValidator("json", RestorePlanRequestSchema), as
 
   const updated = await loadOwnedPlan(db, id, c.get("clientId"));
   return c.json(updated ? toGetPlanResponse(updated) : { error: "not found" });
+});
+
+/** チャットメッセージ行をレスポンス形へ整形する。 */
+function toChatMessage(row: typeof chatMessages.$inferSelect): ChatMessage {
+  return {
+    id: row.id,
+    planId: row.planId,
+    role: row.role,
+    content: row.content,
+    createdAt: row.createdAt,
+  };
+}
+
+/** 計画に紐づくチャット履歴を取得する（古い順）。 */
+plansRoute.get("/:id/chat", async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const row = await loadOwnedPlan(db, id, c.get("clientId"));
+  if (!row) return c.json({ error: "plan not found" }, 404);
+
+  const rows = await db
+    .select()
+    .from(chatMessages)
+    .where(eq(chatMessages.planId, id))
+    .orderBy(asc(chatMessages.createdAt));
+  return c.json({ messages: rows.map(toChatMessage) });
+});
+
+/**
+ * チャット送信（#17/#20）。Cookie 単位で 20回/日に制限する。
+ * 送信時に chat カウンタを原子的にインクリメントし、超過は 429 で拒否する。
+ * 本エンドポイントはユーザー発話の永続化までを担い、AI 応答生成は #20 で実装する。
+ */
+plansRoute.post("/:id/chat", zValidator("json", SendChatMessageRequestSchema), async (c) => {
+  const db = getDb(c.env);
+  const id = c.req.param("id");
+  const clientId = c.get("clientId");
+  const row = await loadOwnedPlan(db, id, clientId);
+  if (!row) return c.json({ error: "plan not found" }, 404);
+
+  const limit = await consumeRateLimit(db, clientId, "chat");
+  if (!limit.allowed) return rateLimited(c, limit);
+
+  const [saved] = await db
+    .insert(chatMessages)
+    .values({
+      id: crypto.randomUUID(),
+      planId: id,
+      role: "user",
+      content: c.req.valid("json").content,
+    })
+    .returning();
+  if (!saved) return c.json({ error: "failed to save message" }, 500);
+  return c.json({ message: toChatMessage(saved) }, 201);
 });
 
 export default plansRoute;

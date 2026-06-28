@@ -47,14 +47,71 @@ export function fetchClientId(): Promise<{ clientId: string }> {
   return apiJson<{ clientId: string }>("/me");
 }
 
-import type { CreatePlanRequest, GetPlanResponse, PlanDiff, PlanVersionMeta } from "@repo/shared";
+import type {
+  ChatMessage,
+  CreatePlanRequest,
+  GetPlanResponse,
+  PlanDiff,
+  PlanVersionMeta,
+  RateLimitStatus,
+  RateLimitsResponse,
+} from "@repo/shared";
 
-/** 旅の条件と行き先を元に新しい計画を作成する */
-export function createPlan(data: CreatePlanRequest): Promise<{ id: string }> {
-  return apiJson<{ id: string }>("/plans", {
+/**
+ * レート制限（429）超過を表すエラー（#17）。
+ * `status` に残回数・次回可能時刻（resetAt）を持つため、UI で案内できる。
+ */
+export class RateLimitError extends Error {
+  readonly status: RateLimitStatus;
+  constructor(status: RateLimitStatus) {
+    super("rate limited");
+    this.name = "RateLimitError";
+    this.status = status;
+  }
+}
+
+/** 429 を検出して RateLimitError へ変換する。それ以外の失敗は汎用 Error。 */
+async function throwForStatus(res: Response): Promise<void> {
+  if (res.status === 429) {
+    const body = (await res.json()) as RateLimitStatus;
+    throw new RateLimitError(body);
+  }
+  if (!res.ok) {
+    throw new Error(`API request failed: ${res.status} ${res.statusText}`);
+  }
+}
+
+/** 旅の条件と行き先を元に新しい計画を作成する（計画 2回/日のレート制限あり, #17） */
+export async function createPlan(data: CreatePlanRequest): Promise<{ id: string }> {
+  const res = await apiFetch("/plans", {
     method: "POST",
     body: JSON.stringify(data),
   });
+  await throwForStatus(res);
+  return res.json() as Promise<{ id: string }>;
+}
+
+/** 当日（JST）のスコープ別レート制限の残回数・リセット時刻を取得する（#17）。 */
+export function getRateLimits(): Promise<RateLimitsResponse> {
+  return apiJson<RateLimitsResponse>("/rate-limits");
+}
+
+/** 計画のチャット履歴を取得する（#20）。 */
+export function getChatMessages(id: string): Promise<{ messages: ChatMessage[] }> {
+  return apiJson<{ messages: ChatMessage[] }>(`/plans/${id}/chat`);
+}
+
+/** チャットメッセージを送信する（チャット 20回/日のレート制限あり, #17）。 */
+export async function sendChatMessage(
+  id: string,
+  content: string,
+): Promise<{ message: ChatMessage }> {
+  const res = await apiFetch(`/plans/${id}/chat`, {
+    method: "POST",
+    body: JSON.stringify({ content }),
+  });
+  await throwForStatus(res);
+  return res.json() as Promise<{ message: ChatMessage }>;
 }
 
 /** 計画を取得する（しおり表示・D1 が単一の真実, #16）。 */

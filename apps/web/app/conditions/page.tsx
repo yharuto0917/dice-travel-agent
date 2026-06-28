@@ -1,15 +1,27 @@
 "use client";
 
 import { Minus, Plus, SlidersHorizontal } from "@phosphor-icons/react";
-import { useMutation } from "@tanstack/react-query";
+import type { RateLimitStatus } from "@repo/shared";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button } from "@/components/ui/button";
-import { createPlan } from "@/lib/api";
+import { createPlan, getRateLimits, RateLimitError } from "@/lib/api";
 import { FLOW_STEPS } from "@/lib/flow";
 import { useDiceStore } from "@/lib/stores/diceStore";
 import { cn } from "@/lib/utils";
+
+/** resetAt（ISO）を「6/29 0:00」のような JST の短い表記にする。 */
+function formatResetAt(resetAt: string): string {
+  return new Date(resetAt).toLocaleString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
 
 const THEME_OPTIONS = ["温泉", "グルメ", "自然", "絶景", "歴史・文化", "アクティビティ"];
 const TRANSPORT_OPTIONS = ["公共交通機関", "レンタカー", "新幹線", "飛行機", "徒歩多め"];
@@ -30,6 +42,15 @@ export default function ConditionsPage() {
 
   const destination = candidates.find((c) => c.id === confirmedCandidateId);
 
+  // 当日の計画作成の残回数（#17）。超過時の案内・ボタン無効化に使う。
+  const rateLimitQuery = useQuery({
+    queryKey: ["rate-limits"],
+    queryFn: getRateLimits,
+  });
+  const planLimit = rateLimitQuery.data?.plan;
+  // 429 で返ったレート制限状況（残回数・次回可能時刻）。
+  const [limitExceeded, setLimitExceeded] = useState<RateLimitStatus | null>(null);
+
   useEffect(() => {
     if (!destination) {
       router.replace("/destination");
@@ -37,6 +58,9 @@ export default function ConditionsPage() {
   }, [destination, router]);
 
   const createPlanMutation = useMutation({
+    onError: (error) => {
+      setLimitExceeded(error instanceof RateLimitError ? error.status : null);
+    },
     mutationFn: async () => {
       if (!destination) throw new Error("Destination is not set");
       const allThemes = customTheme.trim() ? [...themes, customTheme.trim()] : themes;
@@ -273,11 +297,28 @@ export default function ConditionsPage() {
           <Button
             className="w-full py-6 text-lg font-bold rounded-2xl shadow-lg"
             onClick={() => createPlanMutation.mutate()}
-            disabled={createPlanMutation.isPending || !origin.trim()}
+            disabled={createPlanMutation.isPending || !origin.trim() || planLimit?.remaining === 0}
           >
             <SlidersHorizontal size={24} weight="fill" className="mr-2" />
             {createPlanMutation.isPending ? "保存中..." : "この条件で計画を作る"}
           </Button>
+
+          {/* レート制限の残回数・超過案内（#17） */}
+          {limitExceeded ? (
+            <p className="text-xs font-bold text-red-500 text-center">
+              本日の計画作成（{limitExceeded.limit}回/日）の上限に達しました。
+              <br />
+              {formatResetAt(limitExceeded.resetAt)} 以降に再度お試しください。
+            </p>
+          ) : planLimit ? (
+            <p className="text-xs font-bold text-muted">
+              本日の計画作成：残り {planLimit.remaining} / {planLimit.limit} 回
+              {planLimit.remaining === 0
+                ? `（${formatResetAt(planLimit.resetAt)} にリセット）`
+                : null}
+            </p>
+          ) : null}
+
           {!origin.trim() ? (
             <p className="text-xs font-bold text-muted">出発地を入力すると計画を作成できます。</p>
           ) : null}

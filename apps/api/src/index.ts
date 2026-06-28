@@ -1,7 +1,10 @@
+import type { RateLimitsResponse } from "@repo/shared";
 import { routeAgentRequest } from "agents";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { getDb } from "./db/client";
 import type { AppEnv, Bindings } from "./env";
+import { peekRateLimit } from "./lib/rate-limit";
 import { clientId } from "./middleware/client-id";
 import plansRoute from "./routes/plans";
 
@@ -43,6 +46,21 @@ app.get("/health", (c) => c.json({ ok: true }));
 
 /** 現在のクライアント識別子を返す（Cookie 発行の確認・フロント初期化用）。 */
 app.get("/me", (c) => c.json({ clientId: c.get("clientId") }));
+
+/**
+ * 当日（JST）のスコープ別レート制限の残回数・リセット時刻を返す（#17）。
+ * フロントの残回数表示・超過案内に使う。カウンタは消費しない。
+ */
+app.get("/rate-limits", async (c) => {
+  const db = getDb(c.env);
+  const id = c.get("clientId");
+  const now = new Date();
+  const [plan, chat] = await Promise.all([
+    peekRateLimit(db, id, "plan", now),
+    peekRateLimit(db, id, "chat", now),
+  ]);
+  return c.json({ plan, chat } satisfies RateLimitsResponse);
+});
 
 export type AppType = typeof app;
 

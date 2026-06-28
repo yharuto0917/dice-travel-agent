@@ -5,7 +5,7 @@ import type { AgentState, TimelineEvent } from "@repo/shared";
 import { useAgent } from "agents/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -231,7 +231,8 @@ function buildRows(events: TimelineEvent[]): TimelineRow[] {
 
 /** 実行履歴タイムライン。ツール・サブエージェント・フェーズ・思考・確認の流れを時系列で表示する。 */
 function Timeline({ events }: { events: TimelineEvent[] }) {
-  const rows = buildRows(events);
+  // events は毎レンダーで再構築されうるため、行の集約はメモ化する（最大200件の再計算回避）。
+  const rows = useMemo(() => buildRows(events), [events]);
   const scrollRef = useRef<HTMLDivElement>(null);
   // detail を持つ行（終わった思考・サブエージェント結果）は既定で折りたたみ、クリックで開く。
   const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());

@@ -22,6 +22,11 @@ export type Bindings = {
   AI_GATEWAY_TOKEN?: string;
   /** 匿名クライアント識別 Cookie の署名用シークレット（secret 管理, #6） */
   COOKIE_SECRET: string;
+  /**
+   * Cloudflare Turnstile の secret key（secret 管理, #49）。
+   * プラン生成前の人間性検証（siteverify）に使う。未設定時はローカル開発として検証をバイパスする。
+   */
+  TURNSTILE_SECRET_KEY?: string;
   /** CORS 許可オリジン（フロント本番URL）。未設定時は開発用オリジンのみ許可（#6） */
   WEB_ORIGIN?: string;
 

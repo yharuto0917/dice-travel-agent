@@ -70,22 +70,52 @@ export class RateLimitError extends Error {
   }
 }
 
-/** 429 を検出して RateLimitError へ変換する。それ以外の失敗は汎用 Error。 */
+/**
+ * Turnstile（#49）検証失敗を表すエラー。`message` をそのまま UI 案内に使える。
+ */
+export class TurnstileError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TurnstileError";
+  }
+}
+
+/** Turnstile トークンを載せる HTTP ヘッダ名（API 側の定数と一致させる）。 */
+const TURNSTILE_TOKEN_HEADER = "cf-turnstile-response";
+
+/**
+ * レスポンスのステータスを検査し、レート制限(429)/Turnstile(403)を専用エラーへ変換する。
+ * それ以外の失敗は汎用 Error。
+ */
 async function throwForStatus(res: Response): Promise<void> {
   if (res.status === 429) {
     const body = (await res.json()) as RateLimitStatus;
     throw new RateLimitError(body);
+  }
+  if (res.status === 403) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new TurnstileError(body.error ?? "ボット対策の確認に失敗しました。");
   }
   if (!res.ok) {
     throw new Error(`API request failed: ${res.status} ${res.statusText}`);
   }
 }
 
-/** 旅の条件と行き先を元に新しい計画を作成する（計画 2回/日のレート制限あり, #17） */
-export async function createPlan(data: CreatePlanRequest): Promise<{ id: string }> {
+/**
+ * 旅の条件と行き先を元に新しい計画を作成する。
+ * 二段防御: Turnstile トークン(#49)を添付して送り、API 側で人間性検証 → レート制限(#17)を通す。
+ */
+export async function createPlan(
+  data: CreatePlanRequest,
+  turnstileToken?: string | null,
+): Promise<{ id: string }> {
+  const headers: Record<string, string> = {};
+  if (turnstileToken) headers[TURNSTILE_TOKEN_HEADER] = turnstileToken;
+
   const res = await apiFetch("/plans", {
     method: "POST",
     body: JSON.stringify(data),
+    headers,
   });
   await throwForStatus(res);
   return res.json() as Promise<{ id: string }>;

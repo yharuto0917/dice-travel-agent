@@ -4,10 +4,11 @@ import { Minus, Plus, SlidersHorizontal } from "@phosphor-icons/react";
 import type { RateLimitStatus } from "@repo/shared";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/app-shell";
+import { TurnstileWidget } from "@/components/turnstile-widget";
 import { Button } from "@/components/ui/button";
-import { createPlan, getRateLimits, RateLimitError } from "@/lib/api";
+import { createPlan, getRateLimits, RateLimitError, TurnstileError } from "@/lib/api";
 import { FLOW_STEPS } from "@/lib/flow";
 import { useDiceStore } from "@/lib/stores/diceStore";
 import { cn } from "@/lib/utils";
@@ -50,6 +51,15 @@ export default function ConditionsPage() {
   const planLimit = rateLimitQuery.data?.plan;
   // 429 で返ったレート制限状況（残回数・次回可能時刻）。
   const [limitExceeded, setLimitExceeded] = useState<RateLimitStatus | null>(null);
+  // Turnstile（#49）の人間性検証トークン。取得できるまで生成は不可。失敗時はエラー文言。
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileError, setTurnstileError] = useState<string | null>(null);
+
+  const handleTurnstileVerify = useCallback((token: string) => {
+    setTurnstileToken(token);
+    setTurnstileError(null);
+  }, []);
+  const handleTurnstileExpire = useCallback(() => setTurnstileToken(null), []);
 
   useEffect(() => {
     if (!destination) {
@@ -60,6 +70,9 @@ export default function ConditionsPage() {
   const createPlanMutation = useMutation({
     onError: (error) => {
       setLimitExceeded(error instanceof RateLimitError ? error.status : null);
+      setTurnstileError(error instanceof TurnstileError ? error.message : null);
+      // Turnstile はトークンが一度きりのため、拒否されたら無効化して再チャレンジを促す。
+      if (error instanceof TurnstileError) setTurnstileToken(null);
     },
     mutationFn: async () => {
       if (!destination) throw new Error("Destination is not set");
@@ -68,19 +81,22 @@ export default function ConditionsPage() {
         ? [...transports, customTransport.trim()]
         : transports;
 
-      return createPlan({
-        destinationPrefCode: destination.prefectureCode,
-        destinationPref: destination.prefecture,
-        conditions: {
-          origin: origin.trim(),
-          themes: allThemes,
-          budgetRange,
-          nights,
-          partySize,
-          transportPreferences: allTransports,
-          customRequests: customRequests.trim() || undefined,
+      return createPlan(
+        {
+          destinationPrefCode: destination.prefectureCode,
+          destinationPref: destination.prefecture,
+          conditions: {
+            origin: origin.trim(),
+            themes: allThemes,
+            budgetRange,
+            nights,
+            partySize,
+            transportPreferences: allTransports,
+            customRequests: customRequests.trim() || undefined,
+          },
         },
-      });
+        turnstileToken,
+      );
     },
     onSuccess: (data) => {
       router.push(`/generating?planId=${data.id}`);
@@ -293,11 +309,26 @@ export default function ConditionsPage() {
           </section>
         </div>
 
-        <div className="mt-10 flex flex-col items-center gap-2">
+        <div className="mt-10 flex flex-col items-center gap-3">
+          {/* ボット対策の人間性検証（#49）。トークン取得まで生成ボタンは無効。 */}
+          <TurnstileWidget
+            className="flex w-full justify-center"
+            onVerify={handleTurnstileVerify}
+            onExpire={handleTurnstileExpire}
+          />
+          {turnstileError ? (
+            <p className="text-xs font-bold text-red-500 text-center">{turnstileError}</p>
+          ) : null}
+
           <Button
             className="w-full py-6 text-lg font-bold rounded-2xl shadow-lg"
             onClick={() => createPlanMutation.mutate()}
-            disabled={createPlanMutation.isPending || !origin.trim() || planLimit?.remaining === 0}
+            disabled={
+              createPlanMutation.isPending ||
+              !origin.trim() ||
+              !turnstileToken ||
+              planLimit?.remaining === 0
+            }
           >
             <SlidersHorizontal size={24} weight="fill" className="mr-2" />
             {createPlanMutation.isPending ? "保存中..." : "この条件で計画を作る"}
@@ -321,6 +352,10 @@ export default function ConditionsPage() {
 
           {!origin.trim() ? (
             <p className="text-xs font-bold text-muted">出発地を入力すると計画を作成できます。</p>
+          ) : !turnstileToken && !turnstileError ? (
+            <p className="text-xs font-bold text-muted">
+              ボット対策の確認が完了すると計画を作成できます。
+            </p>
           ) : null}
         </div>
       </div>

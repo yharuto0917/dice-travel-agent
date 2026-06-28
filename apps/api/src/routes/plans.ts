@@ -15,6 +15,7 @@ import { chatMessages, type PlanRow, plans, planVersions } from "../db/schema";
 import type { AppEnv } from "../env";
 import { consumeRateLimit } from "../lib/rate-limit";
 import { rateLimited } from "../lib/rate-limit-response";
+import { TURNSTILE_TOKEN_HEADER, verifyTurnstile } from "../lib/turnstile";
 
 const plansRoute = new Hono<AppEnv>();
 
@@ -51,7 +52,25 @@ plansRoute.post("/", zValidator("json", CreatePlanRequestSchema), async (c) => {
   const body = c.req.valid("json");
   const clientId = c.get("clientId");
 
-  // 計画生成は Cookie 単位で 2回/日。生成開始時に原子的にカウントし、超過は 429 で拒否する。
+  // 二段防御の前段（#49）: 人間性検証。高コストな生成を起動する前に Turnstile を検証し、
+  // 失敗は 403 で拒否する。レートリミット（#17・回数制御）より前に置く。
+  const turnstile = await verifyTurnstile(
+    c.env,
+    c.req.header(TURNSTILE_TOKEN_HEADER),
+    c.req.header("cf-connecting-ip"),
+  );
+  if (!turnstile.success) {
+    return c.json(
+      {
+        error: "ボット対策の確認に失敗しました。ページを再読み込みしてお試しください。",
+        code: "turnstile_failed" as const,
+        errorCodes: turnstile.errorCodes,
+      },
+      403,
+    );
+  }
+
+  // 二段防御の後段（#17）: 計画生成は Cookie 単位で 2回/日。原子的にカウントし、超過は 429 で拒否する。
   const limit = await consumeRateLimit(db, clientId, "plan");
   if (!limit.allowed) return rateLimited(c, limit);
 

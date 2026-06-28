@@ -2,6 +2,14 @@ import { z } from "zod";
 
 /** 旅行条件入力（テーマ・予算感・カスタマイズ） */
 export const TripConditionsSchema = z.object({
+  /**
+   * 出発地（都道府県・市区町村・駅名など）。初日の移動の起点に使う。
+   * 入力境界（CreatePlanRequestSchema）では必須だが、ここでは `.default("")` に留める。
+   * TravelPlanSchema にも本スキーマが埋め込まれており、origin を持たない既存の保存データ
+   * （本フィールド追加前のドラフト）を finalize 時の検証（TravelPlanSchema.safeParse）で
+   * 落とさないため（後方互換）。
+   */
+  origin: z.string().default(""),
   /** テーマ（温泉/グルメ/自然/歴史 など。自由記述含む） */
   themes: z.array(z.string()).default([]),
   /** 1人あたりの予算範囲（円） [min, max] */

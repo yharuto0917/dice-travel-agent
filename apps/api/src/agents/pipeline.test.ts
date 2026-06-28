@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { type FillContext, PLAN_PIPELINE } from "./pipeline";
 
 const conditions = (nights: number, budgetMax = 60000): TripConditions => ({
+  origin: "東京駅",
   themes: ["温泉"],
   budgetRange: [0, budgetMax],
   nights,

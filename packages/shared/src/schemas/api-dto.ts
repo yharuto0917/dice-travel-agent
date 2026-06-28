@@ -99,7 +99,11 @@ import { TravelPlanDraftSchema } from "./plan";
 export const CreatePlanRequestSchema = z.object({
   destinationPrefCode: z.string(),
   destinationPref: z.string(),
-  conditions: TripConditionsSchema,
+  // 保存スキーマ（TripConditionsSchema）の origin は後方互換のため `.default("")` だが、
+  // 新規作成の入力境界ではここで必須を強制する（初日の移動の起点に使うため）。
+  conditions: TripConditionsSchema.extend({
+    origin: z.string().trim().min(1, "出発地を入力してください"),
+  }),
 });
 export type CreatePlanRequest = z.infer<typeof CreatePlanRequestSchema>;
 

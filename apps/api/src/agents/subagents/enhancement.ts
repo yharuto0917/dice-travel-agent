@@ -28,7 +28,7 @@ export function buildEnhancementSubagent(env: Bindings, ctx: ToolContext) {
       const { text } = await generateText({
         model: createLlm(env, SUBAGENT_MODEL_ID),
         system:
-          "You are an enhancement subagent. Improve the descriptions and titles of the given travel items to make them more attractive. You can also search for images if needed. Output the enhanced items in a structured format. 思考（reasoning）と出力テキスト（タイトル・説明）は、すべて日本語で記述してください。",
+          "You are an enhancement subagent. Improve the titles and descriptions of the given travel items to be more attractive and informative, while staying factual — do not invent attributes, prices, or claims that may not be true. Keep titles short; keep descriptions concise (1–2 sentences). Preserve each item's id. You may search for images if helpful. Output the enhanced items in a clear structured format. 思考（reasoning）と出力テキスト（タイトル・説明）は、すべて日本語で記述してください。",
         prompt: `Items to enhance: ${JSON.stringify(items, null, 2)}`,
         providerOptions: {
           google: {

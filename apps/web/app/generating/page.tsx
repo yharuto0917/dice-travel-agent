@@ -1,11 +1,12 @@
 "use client";
 
 import { ArrowRight, CheckCircle, Sparkle, WarningCircle } from "@phosphor-icons/react";
-import type { AgentState } from "@repo/shared";
+import type { AgentState, TimelineEvent } from "@repo/shared";
 import { useAgent } from "agents/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Streamdown } from "streamdown";
 import { AppShell } from "@/components/layout/app-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
@@ -14,6 +15,7 @@ import {
   PHASE_LABELS,
   PLAN_ITEM_LABELS,
   SECTION_LABELS,
+  TIMELINE_KIND_ICON,
   TRAVEL_AGENT_NAME,
 } from "@/lib/agent";
 import { FLOW_STEPS } from "@/lib/flow";
@@ -113,19 +115,11 @@ function GeneratingInner({ planId }: { planId: string }) {
               />
             </div>
 
-            {/* ストリーミング中の実行状況（思考・ツール実行）をライブ表示 */}
+            {/* 現在の実行状況（一行）。思考の途中経過も含む詳細は下の実行履歴に流れる。 */}
             {!isDone && !isError && state?.activity ? (
-              <div className="flex flex-col gap-1.5">
-                <div className="flex items-center gap-2 text-xs font-bold text-muted">
-                  <span className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
-                  <span className="truncate">{state.activity}</span>
-                </div>
-                {/* 思考中の要約テキスト（Gemini reasoning）を流し込む */}
-                {state.thought ? (
-                  <p className="line-clamp-3 rounded-xl bg-surface-2/60 px-3 py-2 text-[0.7rem] leading-relaxed text-muted/90">
-                    {state.thought}
-                  </p>
-                ) : null}
+              <div className="flex items-center gap-2 text-xs font-bold text-muted">
+                <span className="inline-flex h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" />
+                <span className="truncate">{state.activity}</span>
               </div>
             ) : null}
 
@@ -145,6 +139,9 @@ function GeneratingInner({ planId }: { planId: string }) {
             ) : null}
           </CardBody>
         </Card>
+
+        {/* 実行履歴タイムライン（#47 可観測性）。生成中も完了後も「何をしたか」を振り返れる。 */}
+        {state && state.timeline.length > 0 ? <Timeline events={state.timeline} /> : null}
 
         {/* HITL: 確認待ちの質問（#13 は足場。通常フローでは表示されない） */}
         {pendingQuestions.length > 0 ? (
@@ -190,6 +187,156 @@ function GeneratingInner({ planId }: { planId: string }) {
         </div>
       </div>
     </AppShell>
+  );
+}
+
+/** start/done を groupId でまとめた表示用の1行。 */
+type TimelineRow = {
+  key: string;
+  kind: TimelineEvent["kind"];
+  label: string;
+  status: TimelineEvent["status"];
+  detail: string | null;
+  dayNumber: number | null;
+};
+
+/**
+ * 履歴イベントを groupId でまとめる。同一 groupId の start→done は1行に集約し、
+ * 最後に来た状態（done/error）で上書きする。groupId が無い単発イベントは id をキーに1行。
+ */
+function buildRows(events: TimelineEvent[]): TimelineRow[] {
+  const rows = new Map<string, TimelineRow>();
+  const order: string[] = [];
+  for (const e of events) {
+    const key = e.groupId ?? e.id;
+    const existing = rows.get(key);
+    if (existing) {
+      existing.status = e.status;
+      existing.label = e.label;
+      if (e.detail) existing.detail = e.detail;
+    } else {
+      rows.set(key, {
+        key,
+        kind: e.kind,
+        label: e.label,
+        status: e.status,
+        detail: e.detail,
+        dayNumber: e.dayNumber,
+      });
+      order.push(key);
+    }
+  }
+  return order.map((k) => rows.get(k) as TimelineRow);
+}
+
+/** 実行履歴タイムライン。ツール・サブエージェント・フェーズ・思考・確認の流れを時系列で表示する。 */
+function Timeline({ events }: { events: TimelineEvent[] }) {
+  // events は毎レンダーで再構築されうるため、行の集約はメモ化する（最大200件の再計算回避）。
+  const rows = useMemo(() => buildRows(events), [events]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // detail を持つ行（終わった思考・サブエージェント結果）は既定で折りたたみ、クリックで開く。
+  const [openKeys, setOpenKeys] = useState<Set<string>>(() => new Set());
+
+  const toggle = (key: string) => {
+    setOpenKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  // 新しいイベントが来たら末尾（最新）へ自動スクロールする。
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el && events.length > 0) el.scrollTop = el.scrollHeight;
+  }, [events.length]);
+
+  return (
+    <Card className="mt-4">
+      <CardBody className="flex flex-col gap-2">
+        <p className="text-xs font-extrabold tracking-wide text-muted">実行履歴</p>
+        <div ref={scrollRef} className="flex max-h-64 flex-col gap-1.5 overflow-y-auto pr-1">
+          {rows.map((row) => {
+            const hasDetail = !!row.detail;
+            const isOpen = openKeys.has(row.key);
+            // 進行中の思考はライブ表示（detail を即表示、トグル不要）。
+            const isLive = row.kind === "thinking" && row.status === "start" && hasDetail;
+            return (
+              <div key={row.key} className="flex items-start gap-2 text-xs">
+                <span className="mt-0.5 shrink-0 leading-none">{TIMELINE_KIND_ICON[row.kind]}</span>
+                {/* ステータス印は 13px 角の枠に揃える。進行中のドットは小さいので枠の中央に
+                    置き、完了/失敗アイコン（13px）と中心位置を一致させる（ズレ防止）。 */}
+                <span className="mt-0.5 flex h-[13px] w-[13px] shrink-0 items-center justify-center">
+                  {row.status === "start" ? (
+                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+                  ) : row.status === "error" ? (
+                    <WarningCircle size={13} weight="fill" className="text-red-500" />
+                  ) : (
+                    <CheckCircle size={13} weight="fill" className="text-primary" />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  {/* 生成中の思考は detail をライブ表示（クリック不要）。終わった思考・サブ
+                      エージェント結果は detail をトグルで開閉する。 */}
+                  {hasDetail && !isLive ? (
+                    <button
+                      type="button"
+                      onClick={() => toggle(row.key)}
+                      className="flex w-full items-center gap-1 text-left"
+                      aria-expanded={isOpen}
+                    >
+                      <span className="font-bold text-foreground/90">
+                        {row.dayNumber ? (
+                          <span className="mr-1 text-muted">[{row.dayNumber}日目]</span>
+                        ) : null}
+                        {row.label}
+                      </span>
+                      <span className="shrink-0 text-[0.65rem] font-bold text-primary/80">
+                        {isOpen ? "閉じる" : row.kind === "thinking" ? "思考を見る" : "詳細"}
+                      </span>
+                    </button>
+                  ) : (
+                    <p className="font-bold text-foreground/90">
+                      {row.dayNumber ? (
+                        <span className="mr-1 text-muted">[{row.dayNumber}日目]</span>
+                      ) : null}
+                      {row.label}
+                    </p>
+                  )}
+                  {/* ライブ思考は流れ込むストリームを Streamdown で Markdown 整形（未完の
+                      ブロックも崩れず描画）。ライブ中は高さを抑えて末尾まで流し込み、確定済みは
+                      展開時に全文表示する。 */}
+                  {row.detail && (isLive || isOpen) ? (
+                    <div
+                      className={cn(
+                        "mt-1 rounded-lg bg-surface-2/60 px-2.5 py-1.5 text-[0.68rem] leading-relaxed text-muted/90",
+                        isLive ? "max-h-16 overflow-hidden" : null,
+                      )}
+                    >
+                      <Streamdown
+                        parseIncompleteMarkdown={isLive}
+                        className={cn(
+                          // 小さな思考ボックス向けにブロック間マージンを詰めて密度を上げる。
+                          "[&_:first-child]:mt-0 [&_:last-child]:mb-0",
+                          "[&_p]:my-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0.5",
+                          "[&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4",
+                          "[&_h1]:my-1 [&_h2]:my-1 [&_h3]:my-1 [&_h1]:text-[0.75rem] [&_h2]:text-[0.72rem] [&_h3]:text-[0.7rem] [&_:is(h1,h2,h3)]:font-bold",
+                          "[&_code]:rounded [&_code]:bg-surface-2 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.64rem]",
+                          "[&_a]:text-primary [&_a]:underline [&_strong]:font-bold",
+                        )}
+                      >
+                        {row.detail}
+                      </Streamdown>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </CardBody>
+    </Card>
   );
 }
 
@@ -248,11 +395,18 @@ function HitlQuestionCard({
   return (
     <Card>
       <CardBody className="flex flex-col gap-3">
-        <p className="text-sm font-bold">{question}</p>
+        <p className="text-sm font-bold break-words">{question}</p>
         {options && options.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {options.map((opt) => (
-              <Button key={opt} size="sm" variant="outline" onClick={() => onAnswer(opt)}>
+              <Button
+                key={opt}
+                size="sm"
+                variant="outline"
+                onClick={() => onAnswer(opt)}
+                // 長い選択肢でもカード幅を超えないよう、固定高さを解いて折り返す。
+                className="h-auto max-w-full whitespace-normal py-1.5 text-left break-words"
+              >
                 {opt}
               </Button>
             ))}
@@ -263,10 +417,15 @@ function HitlQuestionCard({
               type="text"
               value={text}
               onChange={(e) => setText(e.target.value)}
-              className="flex-1 rounded-xl border bg-surface-2 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+              // min-w-0 が無いと flex-1 の入力欄が縮まず、長い入力で回答ボタンを押し出す。
+              className="min-w-0 flex-1 rounded-xl border bg-surface-2 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
               placeholder="回答を入力"
             />
-            <Button size="sm" onClick={() => text.trim() && onAnswer(text.trim())}>
+            <Button
+              size="sm"
+              className="shrink-0"
+              onClick={() => text.trim() && onAnswer(text.trim())}
+            >
               回答
             </Button>
           </div>

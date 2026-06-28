@@ -4,7 +4,7 @@
  * Agent は API Worker（apps/api）側の Durable Object として動作するため、
  * `useAgent` の `host` には API のオリジンを渡す必要がある（web とは別オリジン）。
  */
-import type { AgentPhase, PlanItemType } from "@repo/shared";
+import type { AgentPhase, PlanItemType, TimelineEventKind } from "@repo/shared";
 
 /** Agent クラス名のケバブ表現（`/agents/travel-planning-agent/{planId}`）。 */
 export const TRAVEL_AGENT_NAME = "travel-planning-agent";
@@ -46,6 +46,16 @@ export const SECTION_LABELS: Record<string, string> = {
   transport: "移動",
   budget: "予算",
   summary: "仕上げ",
+};
+
+/** 実行履歴イベント種別の先頭アイコン（絵文字）。タイムライン表示の視認性向上用（#47）。 */
+export const TIMELINE_KIND_ICON: Record<TimelineEventKind, string> = {
+  phase: "🧭",
+  tool: "🔧",
+  subagent: "🧩",
+  thinking: "💭",
+  hitl: "💬",
+  status: "•",
 };
 
 /** 旅程アイテム種別の日本語ラベル。 */

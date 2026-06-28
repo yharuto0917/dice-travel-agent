@@ -16,6 +16,11 @@ export interface UsageCounter {
 export interface HitlCollector {
   pending: HitlQuestion[];
   answers: Record<string, string>;
+  /**
+   * これまでに（過去の日も含め）ユーザーへ提示済みの質問総数（#47）。
+   * humanInTheLoop が上限（MAX_HITL_QUESTIONS）を超えないか判定するために使う。
+   */
+  askedCount: number;
 }
 
 export interface ToolContext {

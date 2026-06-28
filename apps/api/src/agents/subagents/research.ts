@@ -24,7 +24,7 @@ export function buildResearchSubagent(env: Bindings, ctx: ToolContext) {
       const { text } = await generateText({
         model: createLlm(env, SUBAGENT_MODEL_ID),
         system:
-          "You are a research subagent for a travel planning system. Gather information using the provided tools and output a clear summary of your findings and candidate locations. 思考（reasoning）と最終的なまとめは、すべて日本語で記述してください。",
+          "You are a research subagent for a travel planning system. Use the provided tools to gather information, then output a concise summary of concrete, real, currently-operating candidate locations (実在し現在も営業/公開している場所のみ). For each candidate, give its name, area, and a one-line reason it fits the topic. Do not invent places or include ones whose existence is uncertain. Be efficient: avoid redundant searches. 思考（reasoning）と最終的なまとめは、すべて日本語で記述してください。",
         prompt: `Topic: ${topic}\nAround: ${around || "Not specified"}`,
         providerOptions: {
           google: {

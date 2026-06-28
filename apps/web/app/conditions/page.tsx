@@ -18,6 +18,7 @@ export default function ConditionsPage() {
   const router = useRouter();
   const { candidates, confirmedCandidateId } = useDiceStore();
 
+  const [origin, setOrigin] = useState("");
   const [themes, setThemes] = useState<string[]>([]);
   const [customTheme, setCustomTheme] = useState("");
   const [budgetRange, setBudgetRange] = useState<[number, number]>([0, 50000]);
@@ -47,6 +48,7 @@ export default function ConditionsPage() {
         destinationPrefCode: destination.prefectureCode,
         destinationPref: destination.prefecture,
         conditions: {
+          origin: origin.trim(),
           themes: allThemes,
           budgetRange,
           nights,
@@ -91,10 +93,27 @@ export default function ConditionsPage() {
         </p>
 
         <div className="mt-6 flex flex-col gap-8">
+          {/* 出発地（必須） */}
+          <section className="flex flex-col gap-3">
+            <h2 className="text-sm font-bold flex items-center gap-2">
+              <span className="text-primary">1.</span> 出発地
+              <span className="text-red-500">*</span>
+            </h2>
+            <input
+              type="text"
+              required
+              placeholder="例：東京駅、大阪市、名古屋 など"
+              className="px-4 py-2.5 text-sm rounded-xl border bg-surface-2 focus:outline-none focus:ring-2 focus:ring-primary/50"
+              value={origin}
+              onChange={(e) => setOrigin(e.target.value)}
+            />
+            <p className="text-xs text-muted">初日の移動の出発地点になります（必須）。</p>
+          </section>
+
           {/* テーマ */}
           <section className="flex flex-col gap-3">
             <h2 className="text-sm font-bold flex items-center gap-2">
-              <span className="text-primary">1.</span> 旅のテーマ
+              <span className="text-primary">2.</span> 旅のテーマ
             </h2>
             <div className="flex flex-wrap gap-2">
               {THEME_OPTIONS.map((t) => (
@@ -125,7 +144,7 @@ export default function ConditionsPage() {
           {/* 予算感 */}
           <section className="flex flex-col gap-3">
             <h2 className="text-sm font-bold flex items-center gap-2">
-              <span className="text-primary">2.</span> 1人あたりの予算
+              <span className="text-primary">3.</span> 1人あたりの予算
             </h2>
             <div className="px-2">
               <div className="flex justify-between text-sm font-bold text-primary mb-2">
@@ -151,7 +170,7 @@ export default function ConditionsPage() {
           <section className="grid grid-cols-2 gap-4">
             <div className="flex flex-col gap-3">
               <h2 className="text-sm font-bold flex items-center gap-2">
-                <span className="text-primary">3.</span> 日程
+                <span className="text-primary">4.</span> 日程
               </h2>
               <div className="flex items-center justify-between bg-surface-2 p-1.5 rounded-2xl border">
                 <button
@@ -178,7 +197,7 @@ export default function ConditionsPage() {
 
             <div className="flex flex-col gap-3">
               <h2 className="text-sm font-bold flex items-center gap-2">
-                <span className="text-primary">4.</span> 人数
+                <span className="text-primary">5.</span> 人数
               </h2>
               <div className="flex items-center justify-between bg-surface-2 p-1.5 rounded-2xl border">
                 <button
@@ -207,7 +226,7 @@ export default function ConditionsPage() {
           {/* 移動手段 */}
           <section className="flex flex-col gap-3">
             <h2 className="text-sm font-bold flex items-center gap-2">
-              <span className="text-primary">5.</span> 移動手段の希望
+              <span className="text-primary">6.</span> 移動手段の希望
             </h2>
             <div className="flex flex-wrap gap-2">
               {TRANSPORT_OPTIONS.map((t) => (
@@ -238,7 +257,7 @@ export default function ConditionsPage() {
           {/* カスタマイズ */}
           <section className="flex flex-col gap-3">
             <h2 className="text-sm font-bold flex items-center gap-2">
-              <span className="text-primary">6.</span> その他・こだわり条件
+              <span className="text-primary">7.</span> その他・こだわり条件
             </h2>
             <textarea
               className="w-full p-4 text-sm rounded-xl border bg-surface-2 focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
@@ -254,11 +273,14 @@ export default function ConditionsPage() {
           <Button
             className="w-full py-6 text-lg font-bold rounded-2xl shadow-lg"
             onClick={() => createPlanMutation.mutate()}
-            disabled={createPlanMutation.isPending}
+            disabled={createPlanMutation.isPending || !origin.trim()}
           >
             <SlidersHorizontal size={24} weight="fill" className="mr-2" />
             {createPlanMutation.isPending ? "保存中..." : "この条件で計画を作る"}
           </Button>
+          {!origin.trim() ? (
+            <p className="text-xs font-bold text-muted">出発地を入力すると計画を作成できます。</p>
+          ) : null}
         </div>
       </div>
     </AppShell>

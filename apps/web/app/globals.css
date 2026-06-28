@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Streamdown が内部で使うユーティリティクラスを Tailwind に検出させる。
+   pnpm モノレポではルート node_modules に巻き上がるため 3 階層上を参照する。 */
+@source "../../../node_modules/streamdown/dist/*.js";
+
 /* クラスベースのダークモード（.dark を html に付与で切替。基準はライト） */
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -59,6 +63,16 @@
   --color-sun: var(--sun);
   --color-wood: var(--wood);
   --color-ring: var(--ring);
+
+  /* Streamdown（shadcn 由来）が参照するセマンティックトークンをミニチュアパレットへ橋渡し。
+     code/table/blockquote などが背景・境界・補助テキスト色を欠落させずに描画できるようにする。 */
+  --color-border: var(--line);
+  --color-input: var(--line);
+  --color-muted-foreground: var(--muted);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--ink);
+  --color-secondary: var(--surface-2);
+  --color-secondary-foreground: var(--ink);
 
   --font-sans: var(--font-rounded), "Hiragino Maru Gothic ProN", "BIZ UDPGothic",
     "Yu Gothic", ui-rounded, system-ui, sans-serif;

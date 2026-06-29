@@ -6,13 +6,33 @@ import { useEffect, useRef, useState } from "react";
  * Cloudflare Turnstile ウィジェット（#49・ボット/乱用対策の人間性検証）。
  *
  * 明示レンダリング（`window.turnstile.render`）でトークンを取得し `onVerify` に渡す。
- * `NEXT_PUBLIC_TURNSTILE_SITE_KEY` 未設定時は Cloudflare 公式のテストサイトキー
- * （常に成功）を使うため、ローカル開発では設定なしでも通常フローを阻害しない。
+ * ローカル開発（localhost / 127.0.0.1）では `NEXT_PUBLIC_TURNSTILE_SITE_KEY` の値に
+ * 関わらず Cloudflare 公式のテストサイトキー（常に成功）を使う。本番サイトキーは
+ * localhost を許可ドメインに含まないため、そのまま使うと 400020 エラーになるため。
+ * 同様に環境変数が未設定の場合もテストサイトキーにフォールバックする。
  */
 
 const SCRIPT_SRC = "https://challenges.cloudflare.com/turnstile/v0/api.js";
 /** Cloudflare 公式のテスト用サイトキー（常に成功）。ローカル開発の既定値。 */
 const TEST_SITE_KEY = "1x00000000000000000000AA";
+
+/** ローカル開発環境（localhost / 127.0.0.1 / *.localhost）かどうかを判定する。 */
+function isLocalHost(): boolean {
+  if (typeof window === "undefined") return false;
+  const { hostname } = window.location;
+  return (
+    hostname === "localhost" ||
+    hostname === "127.0.0.1" ||
+    hostname === "[::1]" ||
+    hostname.endsWith(".localhost")
+  );
+}
+
+/** 実際に使用する Turnstile サイトキーを返す。ローカルでは常にテストキー。 */
+function resolveSiteKey(): string {
+  if (isLocalHost()) return TEST_SITE_KEY;
+  return process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? TEST_SITE_KEY;
+}
 
 interface TurnstileRenderOptions {
   sitekey: string;
@@ -92,10 +112,12 @@ export function TurnstileWidget({
   const widgetIdRef = useRef<string | null>(null);
 
   const [loadFailed, setLoadFailed] = useState(false);
-  const siteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? TEST_SITE_KEY;
 
   useEffect(() => {
     let cancelled = false;
+    // サイトキーは effect 内（クライアントでのみ実行・window が必ず存在）で確定する。
+    // localhost ではここで TEST_SITE_KEY が選ばれ、本番サイトキーによる 400020 を避ける。
+    const siteKey = resolveSiteKey();
 
     loadTurnstileScript()
       .then(() => {
@@ -124,7 +146,8 @@ export function TurnstileWidget({
         widgetIdRef.current = null;
       }
     };
-  }, [siteKey]);
+    // マウント時に一度だけウィジェットを生成する（サイトキーは effect 内で確定）。
+  }, []);
 
   // 親からの reset 要求。消費済みトークンを破棄して新しいチャレンジを発火し、
   // 成功すれば callback 経由で新しいトークンが onVerify に渡る。

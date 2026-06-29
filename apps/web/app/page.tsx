@@ -72,7 +72,7 @@ export default function Home() {
       </section>
 
       <footer className="mt-auto pt-10 text-center text-xs text-muted">
-        Dice Travel Agent ©2026 Y.Haruto
+        TabiDice ©2026 Y.Haruto
       </footer>
     </div>
   );

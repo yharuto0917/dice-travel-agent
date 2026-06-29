@@ -19,7 +19,7 @@ const mono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ミニ旅ダイス | TabiDice",
+  title: "旅ダイス | TabiDice",
   description:
     "サイコロで行き先を決めて、AI Agentがミニチュアの日本を旅するしおりを自動で作成します。",
   applicationName: "TabiDice",

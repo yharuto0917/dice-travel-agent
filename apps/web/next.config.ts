@@ -1,6 +1,7 @@
 import path from "node:path";
 import { initOpenNextCloudflareForDev } from "@opennextjs/cloudflare";
 import type { NextConfig } from "next";
+import { version } from "./package.json";
 
 initOpenNextCloudflareForDev();
 
@@ -18,6 +19,10 @@ const nextConfig: NextConfig = {
     root: path.join(__dirname, "..", ".."),
   },
   transpilePackages: ["@repo/shared"],
+  // package.json の version をビルド時に注入し、UI でアプリのバージョンを表示する。
+  env: {
+    NEXT_PUBLIC_APP_VERSION: version,
+  },
 };
 
 export default nextConfig;

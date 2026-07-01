@@ -1,4 +1,4 @@
-import { ArrowRight, DiceFive, MapPinLine, PaintBrushBroad } from "@phosphor-icons/react/dist/ssr";
+import { ArrowRight, DiceFive, MapPinLine } from "@phosphor-icons/react/dist/ssr";
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
@@ -12,7 +12,12 @@ export default function Home() {
         <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border-2 border-line bg-primary text-primary-foreground shadow-toy">
           <DiceFive size={22} weight="fill" />
         </span>
-        <span className="text-lg font-extrabold tracking-tight">ミニ旅ダイス</span>
+        <span className="text-lg font-extrabold tracking-tight">旅ダイス</span>
+        {process.env.NEXT_PUBLIC_APP_VERSION && (
+          <span className="rounded-full border border-line bg-surface px-2 py-0.5 text-[0.625rem] font-bold text-muted">
+            v{process.env.NEXT_PUBLIC_APP_VERSION}
+          </span>
+        )}
       </header>
 
       <section className="mt-10">
@@ -72,7 +77,7 @@ export default function Home() {
       </section>
 
       <footer className="mt-auto pt-10 text-center text-xs text-muted">
-        Dice Travel Agent ©2026 Y.Haruto
+        TabiDice ©2026 Y.Haruto
       </footer>
     </div>
   );

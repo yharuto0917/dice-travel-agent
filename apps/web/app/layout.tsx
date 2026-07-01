@@ -19,10 +19,10 @@ const mono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ミニ旅ダイス | Dice Travel Agent",
+  title: "旅ダイス | TabiDice",
   description:
     "サイコロで行き先を決めて、AI Agentがミニチュアの日本を旅するしおりを自動で作成します。",
-  applicationName: "Dice Travel Agent",
+  applicationName: "TabiDice",
 };
 
 export const viewport: Viewport = {

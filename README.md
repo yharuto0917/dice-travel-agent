@@ -1,4 +1,4 @@
-# Dice Travel Agent
+# TabiDice
 
 [![CI](https://github.com/yharuto0917/dice-travel-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/yharuto0917/dice-travel-agent/actions/workflows/ci.yml)
 ![Next.js](https://img.shields.io/badge/Next.js-000000?style=flat-square&logo=nextdotjs&logoColor=white)
@@ -11,7 +11,7 @@
 ![Turborepo](https://img.shields.io/badge/Turborepo-EF4444?style=flat-square&logo=turborepo&logoColor=white)
 ![Tailwind CSS v4](https://img.shields.io/badge/Tailwind_CSS_v4-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white)
 
-Dice Travel Agent は、Cloudflare のエッジコンピューティング環境（Cloudflare Workers & Durable Objects）と Gemini (Vercel AI SDK) を活用した、AI 駆動型の双方向マルチエージェント旅行計画プランナーです。
+TabiDice は、Cloudflare のエッジコンピューティング環境（Cloudflare Workers & Durable Objects）と Gemini (Vercel AI SDK) を活用した、AI 駆動型の双方向マルチエージェント旅行計画プランナーです。
 
 ---
 

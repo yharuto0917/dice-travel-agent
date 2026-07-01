@@ -7,6 +7,7 @@
   },
   "scripts": {
     "dev": "wrangler dev --port 8787",
+    "preview": "wrangler dev --port 8788",
     "deploy": "wrangler deploy",
     "build": "wrangler deploy --dry-run --outdir dist",
     "typecheck": "tsc --noEmit",
@@ -17,9 +18,14 @@
   },
   "type": "module",
   "dependencies": {
+    "@ai-sdk/google": "^3.0.83",
+    "@hono/zod-validator": "^0.8.0",
     "@repo/shared": "workspace:*",
+    "agents": "^0.16.2",
+    "ai": "^6.0.208",
     "drizzle-orm": "^0.45.2",
-    "hono": "^4.12.26"
+    "hono": "^4.12.26",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260621.1",

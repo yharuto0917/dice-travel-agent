@@ -1,13 +1,14 @@
 {
   "name": "dice-travel-agent",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.1.0",
   "packageManager": "pnpm@11.8.0",
   "description": "",
   "main": "index.js",
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
+    "preview": "turbo run preview",
     "deploy": "turbo run deploy",
     "typecheck": "turbo run typecheck",
     "typegen": "pnpm --filter @repo/api cf-typegen && pnpm --filter @repo/web cf-typegen",

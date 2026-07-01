@@ -1,5 +1,375 @@
-import { FlowPlaceholder } from "@/components/flow/flow-placeholder";
+"use client";
+
+import { Minus, Plus, SlidersHorizontal } from "@phosphor-icons/react";
+import type { RateLimitStatus } from "@repo/shared";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import { AppShell } from "@/components/layout/app-shell";
+import { TurnstileWidget } from "@/components/turnstile-widget";
+import { Button } from "@/components/ui/button";
+import { createPlan, getRateLimits, RateLimitError, TurnstileError } from "@/lib/api";
+import { FLOW_STEPS } from "@/lib/flow";
+import { useDiceStore } from "@/lib/stores/diceStore";
+import { cn } from "@/lib/utils";
+
+/** resetAt（ISO）を「6/29 0:00」のような JST の短い表記にする。 */
+function formatResetAt(resetAt: string): string {
+  return new Date(resetAt).toLocaleString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+const THEME_OPTIONS = ["温泉", "グルメ", "自然", "絶景", "歴史・文化", "アクティビティ"];
+const TRANSPORT_OPTIONS = ["公共交通機関", "レンタカー", "新幹線", "飛行機", "徒歩多め"];
 
 export default function ConditionsPage() {
-  return <FlowPlaceholder index={2} />;
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { candidates, confirmedCandidateId } = useDiceStore();
+
+  const [origin, setOrigin] = useState("");
+  const [themes, setThemes] = useState<string[]>([]);
+  const [customTheme, setCustomTheme] = useState("");
+  const [budgetRange, setBudgetRange] = useState<[number, number]>([0, 50000]);
+  const [nights, setNights] = useState(1);
+  const [partySize, setPartySize] = useState(1);
+  const [transports, setTransports] = useState<string[]>([]);
+  const [customTransport, setCustomTransport] = useState("");
+  const [customRequests, setCustomRequests] = useState("");
+
+  const destination = candidates.find((c) => c.id === confirmedCandidateId);
+
+  // 当日の計画作成の残回数（#17）。超過時の案内・ボタン無効化に使う。
+  const rateLimitQuery = useQuery({
+    queryKey: ["rate-limits"],
+    queryFn: getRateLimits,
+  });
+  const planLimit = rateLimitQuery.data?.plan;
+  // 429 で返ったレート制限状況（残回数・次回可能時刻）。
+  const [limitExceeded, setLimitExceeded] = useState<RateLimitStatus | null>(null);
+  // Turnstile（#49）の人間性検証トークン。取得できるまで生成は不可。失敗時はエラー文言。
+  const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+  const [turnstileError, setTurnstileError] = useState<string | null>(null);
+  // 送信のたびにサーバ側でトークンが消費されるため、失敗後はこのシグナルでウィジェットを
+  // reset し、新しいトークンを取り直す（ページ再読み込みなしで再試行できるようにする）。
+  const [turnstileResetSignal, setTurnstileResetSignal] = useState(0);
+
+  const handleTurnstileVerify = useCallback((token: string) => {
+    setTurnstileToken(token);
+    setTurnstileError(null);
+  }, []);
+  const handleTurnstileExpire = useCallback(() => setTurnstileToken(null), []);
+
+  useEffect(() => {
+    if (!destination) {
+      router.replace("/destination");
+    }
+  }, [destination, router]);
+
+  const createPlanMutation = useMutation({
+    onError: (error) => {
+      setLimitExceeded(error instanceof RateLimitError ? error.status : null);
+      setTurnstileError(error instanceof TurnstileError ? error.message : null);
+      // 送信時にサーバ側で Turnstile トークンは消費済みのため、失敗種別を問わず破棄し、
+      // ウィジェットを reset して新しいトークンを取り直す（再読み込みなしで再試行可能にする）。
+      setTurnstileToken(null);
+      setTurnstileResetSignal((n) => n + 1);
+      // 429 のときは残回数が変わっているので残回数表示・ボタン無効化判定を最新化する。
+      if (error instanceof RateLimitError) {
+        queryClient.invalidateQueries({ queryKey: ["rate-limits"] });
+      }
+    },
+    mutationFn: async () => {
+      if (!destination) throw new Error("Destination is not set");
+      const allThemes = customTheme.trim() ? [...themes, customTheme.trim()] : themes;
+      const allTransports = customTransport.trim()
+        ? [...transports, customTransport.trim()]
+        : transports;
+
+      return createPlan(
+        {
+          destinationPrefCode: destination.prefectureCode,
+          destinationPref: destination.prefecture,
+          conditions: {
+            origin: origin.trim(),
+            themes: allThemes,
+            budgetRange,
+            nights,
+            partySize,
+            transportPreferences: allTransports,
+            customRequests: customRequests.trim() || undefined,
+          },
+        },
+        turnstileToken,
+      );
+    },
+    onSuccess: (data) => {
+      router.push(`/generating?planId=${data.id}`);
+    },
+  });
+
+  if (!destination) return null;
+
+  const toggleTheme = (t: string) =>
+    setThemes((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+
+  const toggleTransport = (t: string) =>
+    setTransports((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+
+  return (
+    <AppShell title="旅の条件" back={{ href: "/dice" }}>
+      <div className="flex flex-1 flex-col pb-6">
+        <ol className="flex items-center gap-1.5">
+          {FLOW_STEPS.map((s, i) => (
+            <li
+              key={s.slug}
+              className={cn("h-1.5 flex-1 rounded-full", i <= 2 ? "bg-primary" : "bg-surface-2")}
+            />
+          ))}
+        </ol>
+        <p className="mt-3 text-xs font-bold tracking-wide text-muted">
+          STEP 03 / {String(FLOW_STEPS.length).padStart(2, "0")}
+        </p>
+
+        <h1 className="mt-3 text-xl font-extrabold tracking-tight">旅の条件を入力</h1>
+        <p className="mt-1.5 text-sm leading-relaxed text-muted">
+          行き先は【{destination.prefecture}
+          】です。AIが最高の旅程を作るために、いくつかの希望を教えてください。
+        </p>
+
+        <div className="mt-6 flex flex-col gap-8">
+          {/* 出発地（必須） */}
+          <section className="flex flex-col gap-3">
+            <h2 className="text-sm font-bold flex items-center gap-2">
+              <span className="text-primary">1.</span> 出発地
+              <span className="text-red-500">*</span>
+            </h2>
+            <input
+              type="text"
+              required
+              placeholder="例：東京駅、大阪市、名古屋 など"
+              className="px-4 py-2.5 text-sm rounded-xl border bg-surface-2 focus:outline-none focus:ring-2 focus:ring-primary/50"
+              value={origin}
+              onChange={(e) => setOrigin(e.target.value)}
+            />
+            <p className="text-xs text-muted">初日の移動の出発地点になります（必須）。</p>
+          </section>
+
+          {/* テーマ */}
+          <section className="flex flex-col gap-3">
+            <h2 className="text-sm font-bold flex items-center gap-2">
+              <span className="text-primary">2.</span> 旅のテーマ
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {THEME_OPTIONS.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => toggleTheme(t)}
+                  className={cn(
+                    "px-4 py-2 text-sm font-bold rounded-full border transition-colors",
+                    themes.includes(t)
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-surface-2 text-foreground border-transparent",
+                  )}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              placeholder="その他のテーマ（自由記述）"
+              className="mt-1 px-4 py-2.5 text-sm rounded-xl border bg-surface-2 focus:outline-none focus:ring-2 focus:ring-primary/50"
+              value={customTheme}
+              onChange={(e) => setCustomTheme(e.target.value)}
+            />
+          </section>
+
+          {/* 予算感 */}
+          <section className="flex flex-col gap-3">
+            <h2 className="text-sm font-bold flex items-center gap-2">
+              <span className="text-primary">3.</span> 1人あたりの予算
+            </h2>
+            <div className="px-2">
+              <div className="flex justify-between text-sm font-bold text-primary mb-2">
+                <span>0円</span>
+                <span>{budgetRange[1].toLocaleString()}円</span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={200000}
+                step={5000}
+                value={budgetRange[1]}
+                onChange={(e) => setBudgetRange([0, parseInt(e.target.value, 10)])}
+                className="w-full h-2 bg-surface-2 rounded-lg appearance-none cursor-pointer accent-primary"
+              />
+              <p className="mt-2 text-xs text-muted text-right">
+                〜 {budgetRange[1].toLocaleString()} 円程度
+              </p>
+            </div>
+          </section>
+
+          {/* 日程・人数 */}
+          <section className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-3">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <span className="text-primary">4.</span> 日程
+              </h2>
+              <div className="flex items-center justify-between bg-surface-2 p-1.5 rounded-2xl border">
+                <button
+                  type="button"
+                  onClick={() => setNights((n) => Math.max(0, n - 1))}
+                  className="p-2 rounded-xl bg-background shadow-sm disabled:opacity-50"
+                  disabled={nights <= 0}
+                >
+                  <Minus size={16} weight="bold" />
+                </button>
+                <div className="font-bold text-base w-12 text-center tabular-nums">
+                  {nights === 0 ? "日帰り" : `${nights}泊`}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setNights((n) => Math.min(14, n + 1))}
+                  className="p-2 rounded-xl bg-background shadow-sm disabled:opacity-50"
+                  disabled={nights >= 14}
+                >
+                  <Plus size={16} weight="bold" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <h2 className="text-sm font-bold flex items-center gap-2">
+                <span className="text-primary">5.</span> 人数
+              </h2>
+              <div className="flex items-center justify-between bg-surface-2 p-1.5 rounded-2xl border">
+                <button
+                  type="button"
+                  onClick={() => setPartySize((n) => Math.max(1, n - 1))}
+                  className="p-2 rounded-xl bg-background shadow-sm disabled:opacity-50"
+                  disabled={partySize <= 1}
+                >
+                  <Minus size={16} weight="bold" />
+                </button>
+                <div className="font-bold text-base w-12 text-center tabular-nums">
+                  {partySize}人
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPartySize((n) => Math.min(20, n + 1))}
+                  className="p-2 rounded-xl bg-background shadow-sm disabled:opacity-50"
+                  disabled={partySize >= 20}
+                >
+                  <Plus size={16} weight="bold" />
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {/* 移動手段 */}
+          <section className="flex flex-col gap-3">
+            <h2 className="text-sm font-bold flex items-center gap-2">
+              <span className="text-primary">6.</span> 移動手段の希望
+            </h2>
+            <div className="flex flex-wrap gap-2">
+              {TRANSPORT_OPTIONS.map((t) => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => toggleTransport(t)}
+                  className={cn(
+                    "px-4 py-2 text-sm font-bold rounded-full border transition-colors",
+                    transports.includes(t)
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-surface-2 text-foreground border-transparent",
+                  )}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
+            <input
+              type="text"
+              placeholder="その他の移動手段（自由記述）"
+              className="mt-1 px-4 py-2.5 text-sm rounded-xl border bg-surface-2 focus:outline-none focus:ring-2 focus:ring-primary/50"
+              value={customTransport}
+              onChange={(e) => setCustomTransport(e.target.value)}
+            />
+          </section>
+
+          {/* カスタマイズ */}
+          <section className="flex flex-col gap-3">
+            <h2 className="text-sm font-bold flex items-center gap-2">
+              <span className="text-primary">7.</span> その他・こだわり条件
+            </h2>
+            <textarea
+              className="w-full p-4 text-sm rounded-xl border bg-surface-2 focus:outline-none focus:ring-2 focus:ring-primary/50 resize-none"
+              rows={4}
+              placeholder="例：どうしても海が見えるホテルに泊まりたい、辛いものが苦手なので配慮してほしい 等"
+              value={customRequests}
+              onChange={(e) => setCustomRequests(e.target.value)}
+            />
+          </section>
+        </div>
+
+        <div className="mt-10 flex flex-col items-center gap-3">
+          {/* ボット対策の人間性検証（#49）。トークン取得まで生成ボタンは無効。 */}
+          <TurnstileWidget
+            className="flex w-full justify-center"
+            onVerify={handleTurnstileVerify}
+            onExpire={handleTurnstileExpire}
+            resetSignal={turnstileResetSignal}
+          />
+          {turnstileError ? (
+            <p className="text-xs font-bold text-red-500 text-center">{turnstileError}</p>
+          ) : null}
+
+          <Button
+            className="w-full py-6 text-lg font-bold rounded-2xl shadow-lg"
+            onClick={() => createPlanMutation.mutate()}
+            disabled={
+              createPlanMutation.isPending ||
+              !origin.trim() ||
+              !turnstileToken ||
+              planLimit?.remaining === 0
+            }
+          >
+            <SlidersHorizontal size={24} weight="fill" className="mr-2" />
+            {createPlanMutation.isPending ? "保存中..." : "この条件で計画を作る"}
+          </Button>
+
+          {/* レート制限の残回数・超過案内（#17） */}
+          {limitExceeded ? (
+            <p className="text-xs font-bold text-red-500 text-center">
+              本日の計画作成（{limitExceeded.limit}回/日）の上限に達しました。
+              <br />
+              {formatResetAt(limitExceeded.resetAt)} 以降に再度お試しください。
+            </p>
+          ) : planLimit ? (
+            <p className="text-xs font-bold text-muted">
+              本日の計画作成：残り {planLimit.remaining} / {planLimit.limit} 回
+              {planLimit.remaining === 0
+                ? `（${formatResetAt(planLimit.resetAt)} にリセット）`
+                : null}
+            </p>
+          ) : null}
+
+          {!origin.trim() ? (
+            <p className="text-xs font-bold text-muted">出発地を入力すると計画を作成できます。</p>
+          ) : !turnstileToken && !turnstileError ? (
+            <p className="text-xs font-bold text-muted">
+              ボット対策の確認が完了すると計画を作成できます。
+            </p>
+          ) : null}
+        </div>
+      </div>
+    </AppShell>
+  );
 }

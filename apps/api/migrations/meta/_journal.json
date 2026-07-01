@@ -15,6 +15,13 @@
       "when": 1782219103505,
       "tag": "0001_cookie_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1782355867517,
+      "tag": "0002_typical_bloodstorm",
+      "breakpoints": true
     }
   ]
 }

@@ -1,11 +1,11 @@
 {
   "name": "@repo/web",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
+    "preview": "NEXT_PUBLIC_API_BASE_URL=http://localhost:8788 opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
     "typecheck": "tsc --noEmit"
@@ -13,21 +13,35 @@
   "dependencies": {
     "@ai-sdk/react": "^3.0.210",
     "@phosphor-icons/react": "^2.1.10",
+    "@react-three/cannon": "^6.6.0",
+    "@react-three/drei": "^10.7.7",
+    "@react-three/fiber": "^9.6.1",
     "@repo/api": "workspace:*",
     "@repo/shared": "workspace:*",
+    "@tanstack/react-query": "^5.101.0",
+    "agents": "^0.16.2",
     "ai": "^6.0.208",
     "clsx": "^2.1.1",
+    "d3-geo": "^3.1.1",
     "next": "16.2.9",
+    "open-data-jp-prefectures-geojson": "^1.1.0",
     "react": "19.2.4",
     "react-dom": "19.2.4",
-    "tailwind-merge": "^3.6.0"
+    "streamdown": "^2.5.0",
+    "tailwind-merge": "^3.6.0",
+    "three": "^0.184.0",
+    "topojson-client": "^3.1.0",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@opennextjs/cloudflare": "^1.19.11",
     "@tailwindcss/postcss": "^4",
+    "@types/d3-geo": "^3.1.0",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/three": "^0.184.1",
+    "@types/topojson-client": "^3.1.5",
     "tailwindcss": "^4",
     "typescript": "^5",
     "wrangler": "^4.103.0"

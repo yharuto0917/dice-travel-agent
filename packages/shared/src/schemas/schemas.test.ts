@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentStateSchema } from "./agent";
+import { CreatePlanRequestSchema } from "./api-dto";
 import { ImageRefSchema } from "./common";
 import { TripConditionsSchema } from "./conditions";
 import { DestinationCandidateSchema, DestinationCandidatesSchema } from "./destination";
@@ -64,9 +65,27 @@ describe("DiceStateSchema", () => {
 });
 
 describe("TripConditionsSchema", () => {
-  it("budgetLevel は必須", () => {
-    expect(() => TripConditionsSchema.parse({})).toThrow();
-    expect(TripConditionsSchema.parse({ budgetLevel: "mid" }).nights).toBe(1);
+  it("既定値が正しく設定される（origin は後方互換のため空文字を既定値とする）", () => {
+    const conditions = TripConditionsSchema.parse({});
+    expect(conditions.origin).toBe("");
+    expect(conditions.nights).toBe(1);
+    expect(conditions.budgetRange).toEqual([0, 100000]);
+  });
+});
+
+describe("CreatePlanRequestSchema", () => {
+  const base = { destinationPrefCode: "13", destinationPref: "東京都" };
+
+  it("出発地（origin）は入力境界で必須", () => {
+    expect(() => CreatePlanRequestSchema.parse({ ...base, conditions: {} })).toThrow();
+    expect(() =>
+      CreatePlanRequestSchema.parse({ ...base, conditions: { origin: "  " } }),
+    ).toThrow();
+  });
+
+  it("origin があれば作成リクエストとしてパースできる", () => {
+    const req = CreatePlanRequestSchema.parse({ ...base, conditions: { origin: "東京駅" } });
+    expect(req.conditions.origin).toBe("東京駅");
   });
 });
 
@@ -75,7 +94,7 @@ describe("TravelPlanSchema", () => {
     const plan = TravelPlanSchema.parse({
       id: "p1",
       destination: candidate("c1"),
-      conditions: { budgetLevel: "mid" },
+      conditions: { origin: "東京駅" },
       title: "東京ミニ旅",
       summary: "日帰りで巡るミニチュアの東京",
       nights: 0,

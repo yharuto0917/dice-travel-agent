@@ -91,3 +91,79 @@ export const TransportLegSchema = z.object({
   source: ApiSourceSchema.optional(),
 });
 export type TransportLeg = z.infer<typeof TransportLegSchema>;
+
+import { TripConditionsSchema } from "./conditions";
+import { TravelPlanDraftSchema } from "./plan";
+
+/** 計画作成リクエスト */
+export const CreatePlanRequestSchema = z.object({
+  destinationPrefCode: z.string(),
+  destinationPref: z.string(),
+  // 保存スキーマ（TripConditionsSchema）の origin は後方互換のため `.default("")` だが、
+  // 新規作成の入力境界ではここで必須を強制する（初日の移動の起点に使うため）。
+  conditions: TripConditionsSchema.extend({
+    origin: z.string().trim().min(1, "出発地を入力してください"),
+  }),
+});
+export type CreatePlanRequest = z.infer<typeof CreatePlanRequestSchema>;
+
+/** 計画取得レスポンス（GET /plans/:id, #16）。`plan` は完成前は下書き。 */
+export const GetPlanResponseSchema = z.object({
+  id: z.string(),
+  status: z.enum(["draft", "completed"]),
+  title: z.string().nullable(),
+  destinationPref: z.string().nullable(),
+  conditions: TripConditionsSchema.nullable(),
+  plan: TravelPlanDraftSchema.nullable(),
+  version: z.number().int().min(1),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type GetPlanResponse = z.infer<typeof GetPlanResponseSchema>;
+
+/** バージョン復元リクエスト（POST /plans/:id/restore, #16）。 */
+export const RestorePlanRequestSchema = z.object({
+  version: z.number().int().min(1),
+});
+export type RestorePlanRequest = z.infer<typeof RestorePlanRequestSchema>;
+
+/** レート制限のスコープ（計画生成 / 常駐チャット, #17）。 */
+export const RateScopeSchema = z.enum(["plan", "chat"]);
+export type RateScope = z.infer<typeof RateScopeSchema>;
+
+/**
+ * 1スコープの当日（JST）レート制限状況（#17）。
+ * `remaining` は残回数（0 未満にはならない）、`resetAt` は次にリセットされる
+ * JST 00:00 の時刻（ISO 文字列, UTC）。超過時 UX の「次回可能時刻」に使う。
+ */
+export const RateLimitStatusSchema = z.object({
+  scope: RateScopeSchema,
+  limit: z.number().int().min(0),
+  used: z.number().int().min(0),
+  remaining: z.number().int().min(0),
+  resetAt: z.string(),
+});
+export type RateLimitStatus = z.infer<typeof RateLimitStatusSchema>;
+
+/** 全スコープのレート制限状況（GET /rate-limits, #17）。 */
+export const RateLimitsResponseSchema = z.object({
+  plan: RateLimitStatusSchema,
+  chat: RateLimitStatusSchema,
+});
+export type RateLimitsResponse = z.infer<typeof RateLimitsResponseSchema>;
+
+/** チャット送信リクエスト（POST /plans/:id/chat, #17/#20）。 */
+export const SendChatMessageRequestSchema = z.object({
+  content: z.string().trim().min(1, "メッセージを入力してください").max(2000),
+});
+export type SendChatMessageRequest = z.infer<typeof SendChatMessageRequestSchema>;
+
+/** チャットメッセージ1件（#20）。 */
+export const ChatMessageSchema = z.object({
+  id: z.string(),
+  planId: z.string(),
+  role: z.enum(["user", "assistant", "system"]),
+  content: z.string(),
+  createdAt: z.string(),
+});
+export type ChatMessage = z.infer<typeof ChatMessageSchema>;

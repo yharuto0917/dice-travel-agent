@@ -1,0 +1,92 @@
+name: Deploy
+
+# main マージ（push）時に Cloudflare Workers へ自動デプロイする。
+# service binding（web → API）の依存関係により、api を先・web を後にデプロイする。
+on:
+  push:
+    branches: [main]
+
+# 多重デプロイを直列化する。進行中のデプロイは中断せず後続をキューする。
+concurrency:
+  group: cd-deploy-main
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-api:
+    name: Deploy API Worker
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # ランタイム Secrets を GitHub Secrets から同期する。
+      # 値をログへ出さないよう env 経由で受け取り、jq で JSON 生成 → bulk → 即削除する。
+      - name: Sync runtime secrets
+        working-directory: apps/api
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          AI_GATEWAY_TOKEN: ${{ secrets.AI_GATEWAY_TOKEN }}
+          TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
+          COOKIE_SECRET: ${{ secrets.COOKIE_SECRET }}
+        run: |
+          jq -n \
+            '{GEMINI_API_KEY: env.GEMINI_API_KEY,
+              AI_GATEWAY_TOKEN: env.AI_GATEWAY_TOKEN,
+              TURNSTILE_SECRET_KEY: env.TURNSTILE_SECRET_KEY,
+              COOKIE_SECRET: env.COOKIE_SECRET}' > secrets.json
+          pnpm exec wrangler secret bulk secrets.json
+          rm -f secrets.json
+
+      # D1 本番マイグレーション適用（drizzle-kit push 禁止・適用済み追跡で冪等）
+      - name: Apply D1 migrations
+        run: pnpm --filter @repo/api db:migrate
+
+      - name: Deploy API
+        run: pnpm --filter @repo/api deploy
+
+  deploy-web:
+    name: Deploy Web Worker
+    needs: deploy-api
+    runs-on: ubuntu-latest
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      # NEXT_PUBLIC_* は公開値。OpenNext ビルド前に注入する必要がある。
+      NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+      NEXT_PUBLIC_TURNSTILE_SITE_KEY: ${{ vars.NEXT_PUBLIC_TURNSTILE_SITE_KEY }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Deploy Web
+        run: pnpm --filter @repo/web deploy

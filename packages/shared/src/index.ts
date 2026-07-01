@@ -7,6 +7,7 @@ export const UserSchema = z.object({
 
 export type User = z.infer<typeof UserSchema>;
 
+export * from "./data/prefecture-centroids";
 export * from "./schemas/agent";
 export * from "./schemas/api-dto";
 export * from "./schemas/common";

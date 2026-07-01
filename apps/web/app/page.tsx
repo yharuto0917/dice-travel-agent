@@ -13,6 +13,11 @@ export default function Home() {
           <DiceFive size={22} weight="fill" />
         </span>
         <span className="text-lg font-extrabold tracking-tight">旅ダイス</span>
+        {process.env.NEXT_PUBLIC_APP_VERSION && (
+          <span className="rounded-full border border-line bg-surface px-2 py-0.5 text-[0.625rem] font-bold text-muted">
+            v{process.env.NEXT_PUBLIC_APP_VERSION}
+          </span>
+        )}
       </header>
 
       <section className="mt-10">

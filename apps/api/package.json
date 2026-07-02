@@ -19,6 +19,7 @@
   "type": "module",
   "dependencies": {
     "@ai-sdk/google": "^3.0.83",
+    "@google/genai": "^2.10.0",
     "@hono/zod-validator": "^0.8.0",
     "@repo/shared": "workspace:*",
     "agents": "^0.16.2",

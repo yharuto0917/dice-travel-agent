@@ -3,6 +3,7 @@ import type { ToolContext } from "./context";
 import { buildGoogleMaps } from "./google-maps";
 import { buildHotelSearch } from "./hotel-search";
 import { buildImageSearch } from "./image-search";
+import { buildGenerateImage } from "./generate-image";
 import { buildRestaurantSearch } from "./restaurant-search";
 import { buildTouristSpotSearch } from "./tourist-spot-search";
 import { buildTransportationSearch } from "./transportation-search";
@@ -17,6 +18,7 @@ export function buildTools(ctx: ToolContext) {
     transportationSearch: buildTransportationSearch(ctx),
     weather: buildWeatherSearch(ctx),
     imageSearch: buildImageSearch(ctx),
+    generateImage: buildGenerateImage(ctx),
     googleMaps: buildGoogleMaps(ctx),
     calculate: buildCalculate(ctx),
   };

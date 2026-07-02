@@ -1,11 +1,13 @@
 import type { GeoPoint, HitlQuestion, TripConditions as PlanConditions } from "@repo/shared";
 import type { createClients } from "../../clients";
+import type { Bindings } from "../../env";
 
 export interface UsageCounter {
   toolCalls: number;
   subagents: number;
   tool: () => void;
   subagent: () => void;
+  generateImage: () => void;
 }
 
 /**
@@ -24,6 +26,7 @@ export interface HitlCollector {
 }
 
 export interface ToolContext {
+  env: Bindings;
   clients: ReturnType<typeof createClients>;
   destPoint: GeoPoint | null;
   conditions: Partial<PlanConditions>;

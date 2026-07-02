@@ -113,6 +113,7 @@ const TOOL_LABELS: Record<string, string> = {
   transportationSearch: "移動経路を調べています",
   weather: "天気を確認しています",
   imageSearch: "画像を探しています",
+  generateImage: "画像を生成しています",
   googleMaps: "地図で位置を確認しています",
   calculate: "予算・距離を計算しています",
   google_search: "Web で調べています",

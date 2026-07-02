@@ -82,6 +82,15 @@ function ItineraryInner({ planId }: { planId: string }) {
                       {item.description ? (
                         <span className="mt-0.5 block text-muted">{item.description}</span>
                       ) : null}
+                      {item.image?.url ? (
+                        <div className="mt-2 overflow-hidden rounded-lg">
+                          <img
+                            src={item.image.url}
+                            alt={item.title}
+                            className="aspect-video w-full object-cover"
+                          />
+                        </div>
+                      ) : null}
                     </span>
                   </li>
                 ))}

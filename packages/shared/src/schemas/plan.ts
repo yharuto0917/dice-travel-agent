@@ -99,6 +99,7 @@ export const PlanItemGenSchema = z.object({
     .optional(),
   durationMin: z.number().int().min(0).optional(),
   cost: MoneySchema.optional(),
+  image: ImageRefSchema.optional(),
   location: z
     .object({
       name: z.string(),

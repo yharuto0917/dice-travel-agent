@@ -31,6 +31,23 @@ export function createLlm(env: Bindings, modelId: string = GEMINI_MODEL_ID) {
 }
 
 /**
+ * Imagen モデルを生成する。
+ */
+export function createImageModel(env: Bindings, modelId: string = "gemini-3.1-flash-image") {
+  const baseURL = `https://gateway.ai.cloudflare.com/v1/${env.AI_GATEWAY_ACCOUNT_ID}/${env.AI_GATEWAY_NAME}/google-ai-studio/v1beta`;
+
+  const google = createGoogleGenerativeAI({
+    apiKey: env.GEMINI_API_KEY ?? "",
+    baseURL,
+    headers: {
+      "cf-aig-authorization": `Bearer ${env.AI_GATEWAY_TOKEN ?? ""}`,
+    },
+  });
+
+  return google.image(modelId);
+}
+
+/**
  * AI 経路を有効化できるか。パススルー方式ではモデル認証鍵 GEMINI_API_KEY の有無で判定する。
  * 認証必須 Gateway を通すには別途 AI_GATEWAY_TOKEN も必要（未設定だと呼び出しは 401 になる）。
  */

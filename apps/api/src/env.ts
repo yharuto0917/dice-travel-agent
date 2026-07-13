@@ -29,6 +29,12 @@ export type Bindings = {
   TURNSTILE_SECRET_KEY?: string;
   /** CORS 許可オリジン（フロント本番URL）。未設定時は開発用オリジンのみ許可（#6） */
   WEB_ORIGIN?: string;
+  /**
+   * 生成画像アセットの配信元（この API ワーカー自身の公開URL, #18）。
+   * `/assets/*` は API が配信するため、生成画像URLはフロント（WEB_ORIGIN）ではなく
+   * この値で組み立てる。未設定時はローカル開発の既定（http://localhost:8787）を使う。
+   */
+  ASSET_BASE_URL?: string;
 
   /** 外部APIキー */
   RAKUTEN_APP_ID?: string;

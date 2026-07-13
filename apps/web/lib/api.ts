@@ -10,7 +10,26 @@
  * API のベースURL。本番は `NEXT_PUBLIC_API_BASE_URL` で指定し、
  * 未設定（ローカル開発）では wrangler dev の既定ポート 8787 を使う。
  */
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8787";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8787";
+
+/**
+ * 画像URLを表示用に解決する（#18）。
+ *
+ * 生成画像は API の `/assets/*` から配信されるが、保存時に埋め込まれるオリジンは
+ * 生成した環境（本番/ローカル）に固定される。一方で実体は「生成した API の R2」にあるため、
+ * 別環境のフロントから開くとオリジンが食い違い 404 になる。パスが `/assets/` で始まるURLは、
+ * 保存オリジンを捨てて**現在フロントが使う API ベースURL**から取り直すことで、この不整合を防ぐ。
+ * 外部（Unsplash 等）の絶対URLはそのまま返す。パース不能な値も素通しする。
+ */
+export function resolveAssetUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.pathname.startsWith("/assets/")) return `${API_BASE_URL}${u.pathname}${u.search}`;
+    return url;
+  } catch {
+    return url;
+  }
+}
 
 /**
  * fetch のラッパー。Cookie を確実に送受信できるよう `credentials: "include"` を強制する。

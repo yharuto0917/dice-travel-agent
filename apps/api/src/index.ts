@@ -51,11 +51,11 @@ app.get("/assets/:folder/:filename", async (c) => {
   const key = `${folder}/${filename}`;
   const object = await c.env.BUCKET.get(key);
   if (!object) return c.notFound();
-  
+
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
-  
+
   return new Response(object.body, { headers });
 });
 

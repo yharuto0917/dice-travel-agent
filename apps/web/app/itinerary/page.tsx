@@ -7,7 +7,7 @@ import { Suspense, useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/app-shell";
 import { Card, CardBody } from "@/components/ui/card";
 import { PLAN_ITEM_LABELS } from "@/lib/agent";
-import { getPlan } from "@/lib/api";
+import { getPlan, resolveAssetUrl } from "@/lib/api";
 
 type LoadState =
   | { status: "loading" }
@@ -83,11 +83,11 @@ function ItineraryInner({ planId }: { planId: string }) {
                         <span className="mt-0.5 block text-muted">{item.description}</span>
                       ) : null}
                       {item.image?.url ? (
-                        <div className="mt-2 overflow-hidden rounded-lg">
+                        <div className="mt-2 max-w-md overflow-hidden rounded-lg">
                           <img
-                            src={item.image.url}
+                            src={resolveAssetUrl(item.image.url)}
                             alt={item.title}
-                            className="aspect-video w-full object-cover"
+                            className="aspect-square w-full object-cover"
                           />
                         </div>
                       ) : null}

@@ -57,8 +57,8 @@ describe("validation/diff", () => {
     expect(day1?.change).toBe("changed");
     const byTitle = Object.fromEntries((day1?.items ?? []).map((it) => [it.title, it.change]));
     expect(byTitle["浅草寺（変更）"]).toBe("changed");
-    expect(byTitle["人力車"]).toBe("added");
-    expect(byTitle["寿司"]).toBe("removed");
+    expect(byTitle.人力車).toBe("added");
+    expect(byTitle.寿司).toBe("removed");
   });
 
   it("detects added and removed days", () => {

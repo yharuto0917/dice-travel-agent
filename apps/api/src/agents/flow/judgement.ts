@@ -26,9 +26,6 @@ export function createUsageCounter(): ToolContext["usage"] {
     subagent() {
       this.subagents++;
     },
-    generateImage() {
-      // track image generation
-    },
   };
 }
 

@@ -3,6 +3,7 @@ import { google } from "@ai-sdk/google";
 import type {
   HitlQuestion,
   PlanDay,
+  PlanItem,
   TimelineEventKind,
   TimelineEventStatus,
   TravelPlanDraft,
@@ -14,7 +15,8 @@ import type { Bindings } from "../../env";
 import { createLlm, SUPERVISOR_MODEL_ID } from "../llm/provider";
 import { buildSubagents } from "../subagents";
 import { buildTools } from "../tools";
-import type { ToolContext } from "../tools/context";
+import type { GeneratedImage, ToolContext } from "../tools/context";
+import { generateItemImage } from "../tools/generate-image";
 import { buildHumanInTheLoop } from "../tools/human-in-the-loop";
 import { MAX_STEPS, shouldStopUsageLimit } from "./judgement";
 import { DAY_PLANNER_SYSTEM, dayPlannerPrompt, priorDaysSummary } from "./prompts";
@@ -105,6 +107,73 @@ function sanitizeDay(day: PlanDay): PlanDay {
   };
 }
 
+/** 画像を生成する対象の種別。観光名所（観光スポット `spot`）のみに限定する（#18）。 */
+const IMAGE_TARGET_TYPES: ReadonlySet<PlanItem["type"]> = new Set(["spot"]);
+
+/** 各日の生成枚数の上限（コスト・レイテンシの上限）。 */
+const MAX_IMAGES_PER_DAY = 6;
+
+/**
+ * 画像を生成する対象アイテムを選ぶ（#18）。
+ *
+ * 観光名所（{@link IMAGE_TARGET_TYPES} = `spot`）のうち、まだ image を持たないものを上限まで採る。
+ * 食事・宿・移動・体験・自由時間には生成しない。観光名所を1件も含まない日は画像なしになる。
+ */
+export function selectImageTargets(items: PlanItem[]): { index: number; item: PlanItem }[] {
+  return items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => !item.image && IMAGE_TARGET_TYPES.has(item.type))
+    .slice(0, MAX_IMAGES_PER_DAY);
+}
+
+/**
+ * 画像生成の主題を組み立てる（#18）。具体的な場所名があれば優先し、目的地名で補強する。
+ * これを generateItemImage が写真向けの英語プロンプトへ包む。
+ */
+export function imageSubject(item: PlanItem, destinationName: string | null): string {
+  const base = (item.location?.name?.trim() || item.title).trim();
+  return destinationName ? `${base}（${destinationName}）` : base;
+}
+
+/**
+ * 日の構造化後に、観光名所へ内容一致の風景画像を**決定的に**生成・埋め込む（#18）。
+ *
+ * かつては LLM が `generateImage` ツールを呼ぶ設計だったが、ステップ上限との競合や
+ * URL（ランダム UUID）の転記失敗で「安定して出ない／貼り付け先と内容が不一致」だった。
+ * ここでは LLM のツール呼び出しに依存せず、観光名所（`spot`）のタイトル・場所名から画像を
+ * 並列生成する（上限 {@link MAX_IMAGES_PER_DAY} 枚）。観光名所が無い日は生成しない。
+ */
+async function generateDayImages(
+  env: Bindings,
+  plan: TravelPlanDraft,
+  day: PlanDay,
+  onActivity?: ActivityCallback,
+): Promise<PlanDay> {
+  const targets = selectImageTargets(day.items);
+  if (targets.length === 0) return day;
+
+  onActivity?.("風景画像を生成しています…");
+  // setup ステップで title は "${目的地}の旅" 形式。末尾の "の旅" を落として目的地名を得る。
+  const destinationName = plan.title?.replace(/の旅$/, "").trim() || null;
+
+  const generated = await Promise.all(
+    targets.map((t) => generateItemImage(env, imageSubject(t.item, destinationName))),
+  );
+
+  const byIndex = new Map<number, GeneratedImage>();
+  targets.forEach((t, k) => {
+    const img = generated[k];
+    if (img) byIndex.set(t.index, img);
+  });
+  if (byIndex.size === 0) return day;
+
+  const items = day.items.map((item, index) => {
+    const img = byIndex.get(index);
+    return img ? { ...item, image: { url: img.url, alt: img.prompt, generated: true } } : item;
+  });
+  return { ...day, items };
+}
+
 /** ツール名 → 日本語の実行状況ラベル。ストリーミング中の表示に使う。 */
 const TOOL_LABELS: Record<string, string> = {
   touristSpotSearch: "観光スポットを検索しています",
@@ -113,7 +182,6 @@ const TOOL_LABELS: Record<string, string> = {
   transportationSearch: "移動経路を調べています",
   weather: "天気を確認しています",
   imageSearch: "画像を探しています",
-  generateImage: "画像を生成しています",
   googleMaps: "地図で位置を確認しています",
   calculate: "予算・距離を計算しています",
   google_search: "Web で調べています",
@@ -289,25 +357,29 @@ export async function runDay(
   // finalizedDay はクロージャ内でのみ代入されるため TS は初期値 null から型を広げられない。
   // キャストで宣言型に戻してから items の有無で絞り込む。
   const finalized = finalizedDay as PlanDay | null;
+  let day: PlanDay;
   if (finalized && finalized.items.length > 0) {
-    return { status: "ok", day: sanitizeDay({ ...finalized, dayNumber: n }) };
+    day = sanitizeDay({ ...finalized, dayNumber: n });
+  } else {
+    // 構造化: finalizeDay 未到達／空でも、ストリーム中に集めたツール結果・最終テキストと
+    // 目的地コンテキストを根拠に当日の itinerary を必ず組み立てる。ツールデータが乏しくても
+    // モデルの知識で実在の有名スポット/飲食店を補い、items を空にしない。
+    onActivity?.("日程をまとめています…", "");
+    const structured = await structureDay(env, ctx, plan, n, finalText, toolNotes);
+    if (structured && structured.items.length > 0) {
+      day = structured;
+    } else if (finalized) {
+      // 最終フォールバック: 構造化できなくても finalizeDay があればそれを採用する。
+      day = sanitizeDay({ ...finalized, dayNumber: n });
+    } else {
+      // 決定的な最小日（空 items）を返す（呼び出し側 checker/fix が後段で補う）。
+      day = structured ?? { dayNumber: n, title: `${n}日目`, items: [] };
+    }
   }
 
-  // 構造化: finalizeDay 未到達／空でも、ストリーム中に集めたツール結果・最終テキストと
-  // 目的地コンテキストを根拠に当日の itinerary を必ず組み立てる。ツールデータが乏しくても
-  // モデルの知識で実在の有名スポット/飲食店を補い、items を空にしない。
-  onActivity?.("日程をまとめています…", "");
-  const day = await structureDay(env, ctx, plan, n, finalText, toolNotes);
-  if (day && day.items.length > 0) {
-    return { status: "ok", day };
-  }
-
-  // 最終フォールバック: 構造化できなくても破綻させない。空でも finalizeDay があればそれを、
-  // 無ければ決定的な最小日（空 items）を返す（呼び出し側 checker/fix が後段で補う）。
-  if (finalized) {
-    return { status: "ok", day: sanitizeDay({ ...finalized, dayNumber: n }) };
-  }
-  return { status: "ok", day: day ?? { dayNumber: n, title: `${n}日目`, items: [] } };
+  // 各アイテムへ内容一致の風景画像を決定的に生成・埋め込む（各日2枚以上, #18）。
+  // 全経路（finalizeDay 採用・構造化・フォールバック）に共通で適用する単一の出口。
+  return { status: "ok", day: await generateDayImages(env, plan, day, onActivity) };
 }
 
 /** ツール結果を抽出根拠用にコンパクト化する（巨大 JSON を上限内に収める）。 */

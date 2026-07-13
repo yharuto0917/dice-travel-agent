@@ -1,0 +1,74 @@
+import type { BudgetBreakdown } from "@repo/shared";
+
+interface BudgetPageProps {
+  budget: BudgetBreakdown;
+}
+
+export function BudgetPage({ budget }: BudgetPageProps) {
+  return (
+    <div className="w-full h-full flex flex-col p-4 bg-paper relative overflow-hidden">
+      {/* masking tape on top right */}
+      <div className="absolute -top-1 right-2 w-24 h-8 masking-tape rotate-[20deg] z-10" />
+
+      {/* Red vertical margin line representing notebook paper */}
+      <div className="absolute left-8 top-0 bottom-0 w-[1px] bg-red-300" />
+
+      {/* Content wrapper with lined paper background */}
+      <div
+        className="flex-1 pl-10 pr-2 pt-4 select-none leading-[32px] text-sm overflow-y-auto"
+        style={{
+          backgroundImage:
+            "repeating-linear-gradient(transparent, transparent 31px, var(--color-surface-2) 31px, var(--color-surface-2) 32px)",
+          backgroundAttachment: "local",
+        }}
+      >
+        <h2 className="text-xl font-extrabold mb-8 text-ink bg-surface inline-block pr-4">
+          旅の予算メモ
+        </h2>
+
+        <ul className="space-y-[0px] font-sans font-bold text-ink">
+          {budget.lodging?.amount ? (
+            <li className="flex justify-between items-center h-[32px]">
+              <span>🏨 宿泊費</span>
+              <span>¥{budget.lodging.amount.toLocaleString()}</span>
+            </li>
+          ) : null}
+          {budget.transport?.amount ? (
+            <li className="flex justify-between items-center h-[32px]">
+              <span>🚄 交通費</span>
+              <span>¥{budget.transport.amount.toLocaleString()}</span>
+            </li>
+          ) : null}
+          {budget.food?.amount ? (
+            <li className="flex justify-between items-center h-[32px]">
+              <span>🍔 食費</span>
+              <span>¥{budget.food.amount.toLocaleString()}</span>
+            </li>
+          ) : null}
+          {budget.activities?.amount ? (
+            <li className="flex justify-between items-center h-[32px]">
+              <span>🎟️ 観光・体験</span>
+              <span>¥{budget.activities.amount.toLocaleString()}</span>
+            </li>
+          ) : null}
+          {budget.other?.amount ? (
+            <li className="flex justify-between items-center h-[32px]">
+              <span>💰 その他</span>
+              <span>¥{budget.other.amount.toLocaleString()}</span>
+            </li>
+          ) : null}
+        </ul>
+
+        {/* Total highlighting */}
+        {budget.total?.amount ? (
+          <div className="mt-8 flex justify-between items-center border-t-2 border-dashed border-line pt-2 h-[32px]">
+            <span className="font-extrabold text-primary">合計目安</span>
+            <span className="font-extrabold text-lg text-accent-foreground bg-accent px-2 py-0.5 rounded shadow-toy border-2 border-line">
+              ¥{budget.total.amount.toLocaleString()}
+            </span>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}

@@ -4,10 +4,11 @@ import { ArrowClockwise, WarningCircle } from "@phosphor-icons/react";
 import type { GetPlanResponse } from "@repo/shared";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { BudgetPage } from "@/components/itinerary/BudgetPage";
+import { CoverPage } from "@/components/itinerary/CoverPage";
+import { DayPage } from "@/components/itinerary/DayPage";
 import { AppShell } from "@/components/layout/app-shell";
-import { Card, CardBody } from "@/components/ui/card";
-import { PLAN_ITEM_LABELS } from "@/lib/agent";
-import { getPlan, resolveAssetUrl } from "@/lib/api";
+import { getPlan } from "@/lib/api";
 
 type LoadState =
   | { status: "loading" }
@@ -58,55 +59,32 @@ function ItineraryInner({ planId }: { planId: string }) {
 
   return (
     <AppShell title="旅のしおり" back={{ href: "/" }}>
-      <div className="flex flex-1 flex-col gap-4">
-        {plan?.title ? <h1 className="text-xl font-extrabold">{plan.title}</h1> : null}
-        {plan?.summary ? (
-          <p className="text-sm leading-relaxed text-muted">{plan.summary}</p>
+      <div className="flex flex-1 flex-col gap-8 max-w-2xl mx-auto w-full">
+        {plan ? (
+          <div className="bg-paper border-y-2 border-line sm:border-2 sm:rounded-3xl shadow-toy overflow-hidden aspect-[3/4] max-h-[80vh]">
+            <CoverPage plan={plan} />
+          </div>
         ) : null}
 
-        {plan?.days?.map((day) => (
-          <Card key={day.dayNumber}>
-            <CardBody className="flex flex-col gap-3">
-              <p className="text-base font-bold">{day.title ?? `${day.dayNumber}日目`}</p>
-              <ul className="flex flex-col gap-2">
-                {day.items.map((item) => (
-                  <li key={item.id} className="flex items-start gap-2 text-sm">
-                    <span className="mt-0.5 inline-flex shrink-0 rounded-full bg-surface-2 px-2 py-0.5 text-[0.65rem] font-bold text-primary">
-                      {PLAN_ITEM_LABELS[item.type]}
-                    </span>
-                    <span className="min-w-0">
-                      {item.startTime ? (
-                        <span className="mr-1 font-bold text-foreground">{item.startTime}</span>
-                      ) : null}
-                      <span className="font-bold text-foreground">{item.title}</span>
-                      {item.description ? (
-                        <span className="mt-0.5 block text-muted">{item.description}</span>
-                      ) : null}
-                      {item.image?.url ? (
-                        <div className="mt-2 max-w-md overflow-hidden rounded-lg">
-                          <img
-                            src={resolveAssetUrl(item.image.url)}
-                            alt={item.title}
-                            className="aspect-square w-full object-cover"
-                          />
-                        </div>
-                      ) : null}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </CardBody>
-          </Card>
-        ))}
+        <div className="flex flex-col gap-12">
+          {plan?.days?.map((day) => (
+            <div
+              key={day.dayNumber}
+              className="bg-paper border-y-2 border-line sm:border-2 sm:rounded-3xl shadow-toy overflow-hidden min-h-[50vh]"
+            >
+              <DayPage day={day} />
+            </div>
+          ))}
+        </div>
 
         {plan?.budget?.total ? (
-          <p className="text-right text-sm font-bold">
-            予算の目安: 約 {plan.budget.total.amount.toLocaleString()} 円
-          </p>
+          <div className="bg-paper border-y-2 border-line sm:border-2 sm:rounded-3xl shadow-toy overflow-hidden min-h-[40vh]">
+            <BudgetPage budget={plan.budget} />
+          </div>
         ) : null}
 
         {!plan?.days?.length ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted">
+          <div className="flex flex-1 items-center justify-center text-sm text-muted min-h-[20vh] border-2 border-dashed border-line rounded-xl">
             まだ予定がありません
           </div>
         ) : null}

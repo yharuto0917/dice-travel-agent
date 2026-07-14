@@ -25,7 +25,7 @@ export function DayPage({ day }: DayPageProps) {
             {day.items.map((item) => (
               <div key={item.id} className="relative pl-8">
                 {/* Timeline Dot */}
-                <div className="absolute left-[6px] top-[1.35rem] w-3 h-3 rounded-full bg-surface border-2 border-primary z-10" />
+                <div className="absolute left-[6px] top-[0.4rem] w-3 h-3 rounded-full bg-surface border-2 border-primary z-10" />
                 <TimelineItemCard item={item} />
               </div>
             ))}

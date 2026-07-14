@@ -11,31 +11,39 @@ export function TimelineItemCard({ item }: TimelineItemCardProps) {
   const attribution = item.image?.attribution ?? item.attribution;
 
   return (
-    <div className="relative flex flex-col gap-2 rounded-2xl bg-paper border-2 border-line p-4 shadow-toy mb-4">
+    <div className="relative flex flex-col gap-1 pb-6">
       <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            {/* Type badge */}
-            <span className="rounded-full bg-accent px-2 py-0.5 text-[0.65rem] font-bold text-accent-foreground border-2 border-line shadow-toy">
-              {PLAN_ITEM_LABELS[item.type] ?? item.type}
-            </span>
+        <div className="flex-1 min-w-0 pt-1">
+          <div className="flex items-center gap-3 mb-2 flex-wrap">
             {item.startTime ? (
-              <span className="font-bold text-ink bg-surface-2 px-1.5 py-0.5 rounded text-sm">
+              <span className="font-extrabold text-ink text-lg tracking-wider border-b-2 border-accent/50 pb-0.5">
                 {item.startTime}
               </span>
             ) : null}
-            <h3 className="font-bold text-base text-ink line-clamp-2">{item.title}</h3>
+            <h3 className="font-extrabold text-lg text-ink">{item.title}</h3>
+            {/* Type badge like a small stamp */}
+            <span className="rounded border border-muted/40 text-muted px-1.5 py-0.5 text-[0.65rem] font-bold">
+              {PLAN_ITEM_LABELS[item.type] ?? item.type}
+            </span>
           </div>
 
           {item.description ? (
-            <p className="text-sm text-muted line-clamp-3 mb-2">{item.description}</p>
+            <p className="text-sm text-ink/80 leading-[1.8] mb-3">{item.description}</p>
           ) : null}
 
-          {/* Image */}
+          {/* Cost/Duration info like scribbled notes */}
+          {item.cost?.amount || item.durationMin ? (
+            <div className="flex flex-wrap gap-4 text-xs text-muted/90 font-bold mb-4 bg-surface-2/40 px-3 py-2 rounded-lg inline-flex">
+              {item.cost?.amount ? <span>¥{item.cost.amount.toLocaleString()}</span> : null}
+              {item.durationMin ? <span>{item.durationMin}分</span> : null}
+            </div>
+          ) : null}
+
+          {/* Image (Polaroid style) */}
           {item.image?.url ? (
-            <div className="mt-4 flex flex-col gap-1 relative">
-              <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-20 h-6 masking-tape z-10 rotate-[1deg]" />
-              <div className="overflow-hidden border-[6px] border-white shadow-sm bg-white aspect-[4/3] rotate-[-1deg] relative">
+            <div className="mt-2 flex flex-col gap-1 relative w-fit max-w-full">
+              <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-24 h-7 masking-tape z-10 rotate-[1deg]" />
+              <div className="overflow-hidden border-[8px] border-b-[24px] border-white shadow-sm bg-white aspect-[4/3] rotate-[-2deg] relative">
                 <img
                   src={resolveAssetUrl(item.image.url)}
                   alt={item.title}
@@ -64,18 +72,6 @@ export function TimelineItemCard({ item }: TimelineItemCardProps) {
               ) : null}
             </div>
           ) : null}
-
-          {/* Cost/Duration info if available */}
-          <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted font-bold">
-            {item.cost?.amount ? (
-              <span className="bg-surface-2 px-1.5 py-0.5 rounded">
-                ¥{item.cost.amount.toLocaleString()}
-              </span>
-            ) : null}
-            {item.durationMin ? (
-              <span className="bg-surface-2 px-1.5 py-0.5 rounded">{item.durationMin}分</span>
-            ) : null}
-          </div>
         </div>
       </div>
     </div>

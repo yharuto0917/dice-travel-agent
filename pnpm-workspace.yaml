@@ -8,5 +8,5 @@ allowBuilds:
   node-liblzma: false
   esbuild: false
   sharp: false
-  workerd: false
+  workerd: true
   protobufjs: false

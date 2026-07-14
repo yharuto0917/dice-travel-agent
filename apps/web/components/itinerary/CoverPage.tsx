@@ -28,7 +28,7 @@ export function CoverPage({ plan }: CoverPageProps) {
             {attribution ? (
               <div className="text-[10px] text-muted text-right pr-1">
                 Photo by{" "}
-                {attribution.url ? (
+                {attribution.url && attribution.url.startsWith("http") ? (
                   <a
                     href={attribution.url}
                     target="_blank"
@@ -55,7 +55,7 @@ export function CoverPage({ plan }: CoverPageProps) {
 
         <div className="mt-4 flex flex-col gap-2 font-bold text-sm text-ink bg-surface-2 p-4 rounded-xl border-2 border-line w-full">
           <div>出発日: {plan.startDate ?? "未定"}</div>
-          <div>日数: {plan.nights ? `${plan.nights}泊${plan.nights + 1}日` : "未定"}</div>
+          <div>日数: {plan.nights != null ? `${plan.nights}泊${plan.nights + 1}日` : "未定"}</div>
         </div>
       </div>
     </div>

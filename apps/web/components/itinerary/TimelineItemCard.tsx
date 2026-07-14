@@ -32,10 +32,10 @@ export function TimelineItemCard({ item }: TimelineItemCardProps) {
           ) : null}
 
           {/* Cost/Duration info like scribbled notes */}
-          {item.cost?.amount || item.durationMin ? (
+          {item.cost?.amount != null || item.durationMin != null ? (
             <div className="flex flex-wrap gap-4 text-xs text-muted/90 font-bold mb-4 bg-surface-2/40 px-3 py-2 rounded-lg inline-flex">
-              {item.cost?.amount ? <span>¥{item.cost.amount.toLocaleString()}</span> : null}
-              {item.durationMin ? <span>{item.durationMin}分</span> : null}
+              {item.cost?.amount != null ? <span>¥{item.cost.amount.toLocaleString()}</span> : null}
+              {item.durationMin != null ? <span>{item.durationMin}分</span> : null}
             </div>
           ) : null}
 
@@ -55,7 +55,7 @@ export function TimelineItemCard({ item }: TimelineItemCardProps) {
               {attribution ? (
                 <div className="text-[10px] text-muted text-right pr-1">
                   Photo by{" "}
-                  {attribution.url ? (
+                  {attribution.url && attribution.url.startsWith("http") ? (
                     <a
                       href={attribution.url}
                       target="_blank"

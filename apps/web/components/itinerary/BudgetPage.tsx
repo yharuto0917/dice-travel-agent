@@ -11,31 +11,31 @@ export function BudgetPage({ budget }: BudgetPageProps) {
         <h2 className="text-xl font-extrabold mb-8 text-ink inline-block pr-4">旅の予算メモ</h2>
 
         <ul className="space-y-[0px] font-sans font-bold text-ink">
-          {budget.lodging?.amount ? (
+          {budget.lodging?.amount != null ? (
             <li className="flex justify-between items-center h-[32px]">
               <span>🏨 宿泊費</span>
               <span>¥{budget.lodging.amount.toLocaleString()}</span>
             </li>
           ) : null}
-          {budget.transport?.amount ? (
+          {budget.transport?.amount != null ? (
             <li className="flex justify-between items-center h-[32px]">
               <span>🚄 交通費</span>
               <span>¥{budget.transport.amount.toLocaleString()}</span>
             </li>
           ) : null}
-          {budget.food?.amount ? (
+          {budget.food?.amount != null ? (
             <li className="flex justify-between items-center h-[32px]">
               <span>🍔 食費</span>
               <span>¥{budget.food.amount.toLocaleString()}</span>
             </li>
           ) : null}
-          {budget.activities?.amount ? (
+          {budget.activities?.amount != null ? (
             <li className="flex justify-between items-center h-[32px]">
               <span>🎟️ 観光・体験</span>
               <span>¥{budget.activities.amount.toLocaleString()}</span>
             </li>
           ) : null}
-          {budget.other?.amount ? (
+          {budget.other?.amount != null ? (
             <li className="flex justify-between items-center h-[32px]">
               <span>💰 その他</span>
               <span>¥{budget.other.amount.toLocaleString()}</span>
@@ -44,7 +44,7 @@ export function BudgetPage({ budget }: BudgetPageProps) {
         </ul>
 
         {/* Total highlighting */}
-        {budget.total?.amount ? (
+        {budget.total?.amount != null ? (
           <div className="mt-8 flex justify-between items-center border-t-2 border-dashed border-line pt-2 h-[32px]">
             <span className="font-extrabold text-primary">合計目安</span>
             <span className="font-extrabold text-lg text-accent-foreground bg-accent px-2 py-0.5 rounded shadow-toy border-2 border-line">

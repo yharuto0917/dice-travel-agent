@@ -62,7 +62,7 @@ function ItineraryInner({ planId }: { planId: string }) {
       <div className="w-full max-w-3xl mx-auto py-6 sm:py-10 px-2 sm:px-4">
         <div className="bg-paper border-y-2 border-line sm:border-2 sm:rounded-3xl shadow-toy-lg relative overflow-hidden flex flex-col">
           {/* Red vertical margin line for the whole notebook */}
-          <div className="absolute left-6 md:left-10 top-0 bottom-0 w-[2px] bg-red-300/60 z-0 pointer-events-none" />
+          <div className="absolute left-6 md:left-10 top-0 bottom-0 w-[2px] bg-[var(--margin-line)] z-0 pointer-events-none" />
 
           {/* Lined paper background pattern */}
           <div
@@ -86,14 +86,10 @@ function ItineraryInner({ planId }: { planId: string }) {
             ) : null}
 
             <div className="flex flex-col">
-              {plan?.days?.map((day, i) => (
+              {plan?.days?.map((day, i, arr) => (
                 <div
                   key={day.dayNumber}
-                  className={
-                    i !== (plan.days?.length ?? 1) - 1
-                      ? "border-b-2 border-dashed border-line/20"
-                      : ""
-                  }
+                  className={i !== arr.length - 1 ? "border-b-2 border-dashed border-line/20" : ""}
                 >
                   <DayPage day={day} />
                 </div>

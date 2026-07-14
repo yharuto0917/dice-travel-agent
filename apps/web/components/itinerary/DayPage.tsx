@@ -10,19 +10,7 @@ export function DayPage({ day }: DayPageProps) {
   const hasItems = day.items && day.items.length > 0;
 
   return (
-    <div className="flex flex-col w-full h-full p-4 md:p-6 overflow-y-auto bg-paper relative">
-      {/* Notebook binding margin */}
-      <div className="absolute left-6 top-0 bottom-0 w-[2px] bg-line/10 z-0" />
-
-      {/* Binder holes on the left edge */}
-      <div className="absolute left-3 top-0 bottom-0 flex flex-col justify-evenly py-10 z-10">
-        <div className="binder-hole" />
-        <div className="binder-hole" />
-        <div className="binder-hole" />
-        <div className="binder-hole" />
-        <div className="binder-hole" />
-      </div>
-
+    <div className="flex flex-col w-full p-6 sm:p-10 relative">
       <div className="mb-6 flex flex-col gap-1 pl-10 relative z-10">
         <h2 className="text-2xl font-extrabold text-ink">{day.title ?? `Day ${day.dayNumber}`}</h2>
         {day.date ? <span className="text-sm font-bold text-muted">{day.date}</span> : null}

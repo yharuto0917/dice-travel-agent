@@ -6,25 +6,10 @@ interface BudgetPageProps {
 
 export function BudgetPage({ budget }: BudgetPageProps) {
   return (
-    <div className="w-full h-full flex flex-col p-4 bg-paper relative overflow-hidden">
-      {/* masking tape on top right */}
-      <div className="absolute -top-1 right-2 w-24 h-8 masking-tape rotate-[20deg] z-10" />
-
-      {/* Red vertical margin line representing notebook paper */}
-      <div className="absolute left-8 top-0 bottom-0 w-[1px] bg-red-300" />
-
-      {/* Content wrapper with lined paper background */}
-      <div
-        className="flex-1 pl-10 pr-2 pt-4 select-none leading-[32px] text-sm overflow-y-auto"
-        style={{
-          backgroundImage:
-            "repeating-linear-gradient(transparent, transparent 31px, var(--color-surface-2) 31px, var(--color-surface-2) 32px)",
-          backgroundAttachment: "local",
-        }}
-      >
-        <h2 className="text-xl font-extrabold mb-8 text-ink bg-surface inline-block pr-4">
-          旅の予算メモ
-        </h2>
+    <div className="w-full flex flex-col p-6 sm:p-10 relative">
+      {/* Content wrapper */}
+      <div className="flex-1 pl-10 pr-2 pt-4 select-none leading-[32px] text-sm relative z-10">
+        <h2 className="text-xl font-extrabold mb-8 text-ink inline-block pr-4">旅の予算メモ</h2>
 
         <ul className="space-y-[0px] font-sans font-bold text-ink">
           {budget.lodging?.amount ? (

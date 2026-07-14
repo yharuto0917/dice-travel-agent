@@ -59,35 +59,60 @@ function ItineraryInner({ planId }: { planId: string }) {
 
   return (
     <AppShell title="旅のしおり" back={{ href: "/" }}>
-      <div className="flex flex-1 flex-col gap-8 max-w-2xl mx-auto w-full">
-        {plan ? (
-          <div className="bg-paper border-y-2 border-line sm:border-2 sm:rounded-3xl shadow-toy overflow-hidden aspect-[3/4] max-h-[80vh]">
-            <CoverPage plan={plan} />
-          </div>
-        ) : null}
+      <div className="w-full max-w-3xl mx-auto py-6 sm:py-10 px-2 sm:px-4">
+        <div className="bg-paper border-y-2 border-line sm:border-2 sm:rounded-3xl shadow-toy-lg relative overflow-hidden flex flex-col">
+          {/* Red vertical margin line for the whole notebook */}
+          <div className="absolute left-6 md:left-10 top-0 bottom-0 w-[2px] bg-red-300/60 z-0 pointer-events-none" />
 
-        <div className="flex flex-col gap-12">
-          {plan?.days?.map((day) => (
-            <div
-              key={day.dayNumber}
-              className="bg-paper border-y-2 border-line sm:border-2 sm:rounded-3xl shadow-toy overflow-hidden min-h-[50vh]"
-            >
-              <DayPage day={day} />
+          {/* Lined paper background pattern */}
+          <div
+            className="absolute inset-0 pointer-events-none z-0 opacity-50"
+            style={{
+              backgroundImage:
+                "repeating-linear-gradient(transparent, transparent 31px, var(--color-line) 31px, var(--color-line) 32px)",
+              backgroundAttachment: "local",
+              opacity: 0.1,
+            }}
+          />
+
+          {/* Masking tape on top to look attached to a board */}
+          <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-48 h-10 masking-tape rotate-[-1deg] z-20" />
+
+          <div className="relative z-10 flex flex-col">
+            {plan ? (
+              <div className="pb-10 border-b-2 border-dashed border-line/20">
+                <CoverPage plan={plan} />
+              </div>
+            ) : null}
+
+            <div className="flex flex-col">
+              {plan?.days?.map((day, i) => (
+                <div
+                  key={day.dayNumber}
+                  className={
+                    i !== (plan.days?.length ?? 1) - 1
+                      ? "border-b-2 border-dashed border-line/20"
+                      : ""
+                  }
+                >
+                  <DayPage day={day} />
+                </div>
+              ))}
             </div>
-          ))}
+
+            {plan?.budget?.total ? (
+              <div className="border-t-2 border-dashed border-line/20">
+                <BudgetPage budget={plan.budget} />
+              </div>
+            ) : null}
+
+            {!plan?.days?.length ? (
+              <div className="flex items-center justify-center text-sm text-muted h-40">
+                まだ予定がありません
+              </div>
+            ) : null}
+          </div>
         </div>
-
-        {plan?.budget?.total ? (
-          <div className="bg-paper border-y-2 border-line sm:border-2 sm:rounded-3xl shadow-toy overflow-hidden min-h-[40vh]">
-            <BudgetPage budget={plan.budget} />
-          </div>
-        ) : null}
-
-        {!plan?.days?.length ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted min-h-[20vh] border-2 border-dashed border-line rounded-xl">
-            まだ予定がありません
-          </div>
-        ) : null}
       </div>
     </AppShell>
   );

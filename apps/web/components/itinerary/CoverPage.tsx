@@ -14,16 +14,7 @@ export function CoverPage({ plan }: CoverPageProps) {
   const attribution = displayImage?.attribution;
 
   return (
-    <div className="flex flex-col w-full h-full p-6 bg-paper overflow-y-auto relative">
-      {/* Binder holes on the left edge */}
-      <div className="absolute left-3 top-0 bottom-0 flex flex-col justify-evenly py-10 z-10">
-        <div className="binder-hole" />
-        <div className="binder-hole" />
-        <div className="binder-hole" />
-        <div className="binder-hole" />
-        <div className="binder-hole" />
-      </div>
-
+    <div className="flex flex-col w-full p-6 sm:p-10 relative">
       <div className="flex-1 flex flex-col items-center justify-center text-center gap-8 pl-6">
         {displayImage?.url ? (
           <div className="w-full flex flex-col gap-2">

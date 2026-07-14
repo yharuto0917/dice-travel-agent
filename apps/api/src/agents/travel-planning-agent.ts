@@ -158,6 +158,7 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
       const destPoint = await this.loadDestPoint(clients, row.destinationPref);
 
       const ctx: ToolContext = {
+        env: this.env,
         clients,
         destPoint,
         conditions: row.conditions || {},

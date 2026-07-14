@@ -5,6 +5,7 @@ import { buildHumanInTheLoop, HITL_LIMIT_REACHED, HITL_PENDING } from "./human-i
 
 function makeCtx(askedCount = 0): ToolContext {
   return {
+    env: {} as ToolContext["env"],
     clients: {} as ToolContext["clients"],
     destPoint: null,
     conditions: {},

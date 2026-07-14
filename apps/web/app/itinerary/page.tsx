@@ -4,9 +4,10 @@ import { ArrowClockwise, WarningCircle } from "@phosphor-icons/react";
 import type { GetPlanResponse } from "@repo/shared";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState } from "react";
+import { BudgetPage } from "@/components/itinerary/BudgetPage";
+import { CoverPage } from "@/components/itinerary/CoverPage";
+import { DayPage } from "@/components/itinerary/DayPage";
 import { AppShell } from "@/components/layout/app-shell";
-import { Card, CardBody } from "@/components/ui/card";
-import { PLAN_ITEM_LABELS } from "@/lib/agent";
 import { getPlan } from "@/lib/api";
 
 type LoadState =
@@ -58,49 +59,56 @@ function ItineraryInner({ planId }: { planId: string }) {
 
   return (
     <AppShell title="旅のしおり" back={{ href: "/" }}>
-      <div className="flex flex-1 flex-col gap-4">
-        {plan?.title ? <h1 className="text-xl font-extrabold">{plan.title}</h1> : null}
-        {plan?.summary ? (
-          <p className="text-sm leading-relaxed text-muted">{plan.summary}</p>
-        ) : null}
+      <div className="w-full max-w-3xl mx-auto py-6 sm:py-10 px-2 sm:px-4">
+        <div className="bg-paper border-y-2 border-line sm:border-2 sm:rounded-3xl shadow-toy-lg relative overflow-hidden flex flex-col">
+          {/* Red vertical margin line for the whole notebook */}
+          <div className="absolute left-6 md:left-10 top-0 bottom-0 w-[2px] bg-[var(--margin-line)] z-0 pointer-events-none" />
 
-        {plan?.days?.map((day) => (
-          <Card key={day.dayNumber}>
-            <CardBody className="flex flex-col gap-3">
-              <p className="text-base font-bold">{day.title ?? `${day.dayNumber}日目`}</p>
-              <ul className="flex flex-col gap-2">
-                {day.items.map((item) => (
-                  <li key={item.id} className="flex items-start gap-2 text-sm">
-                    <span className="mt-0.5 inline-flex shrink-0 rounded-full bg-surface-2 px-2 py-0.5 text-[0.65rem] font-bold text-primary">
-                      {PLAN_ITEM_LABELS[item.type]}
-                    </span>
-                    <span className="min-w-0">
-                      {item.startTime ? (
-                        <span className="mr-1 font-bold text-foreground">{item.startTime}</span>
-                      ) : null}
-                      <span className="font-bold text-foreground">{item.title}</span>
-                      {item.description ? (
-                        <span className="mt-0.5 block text-muted">{item.description}</span>
-                      ) : null}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </CardBody>
-          </Card>
-        ))}
+          {/* Lined paper background pattern */}
+          <div
+            className="absolute inset-0 pointer-events-none z-0 opacity-50"
+            style={{
+              backgroundImage:
+                "repeating-linear-gradient(transparent, transparent 31px, var(--color-line) 31px, var(--color-line) 32px)",
+              backgroundAttachment: "local",
+              opacity: 0.1,
+            }}
+          />
 
-        {plan?.budget?.total ? (
-          <p className="text-right text-sm font-bold">
-            予算の目安: 約 {plan.budget.total.amount.toLocaleString()} 円
-          </p>
-        ) : null}
+          {/* Masking tape on top to look attached to a board */}
+          <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-48 h-10 masking-tape rotate-[-1deg] z-20" />
 
-        {!plan?.days?.length ? (
-          <div className="flex flex-1 items-center justify-center text-sm text-muted">
-            まだ予定がありません
+          <div className="relative z-10 flex flex-col">
+            {plan ? (
+              <div className="pb-10 border-b-2 border-dashed border-line/20">
+                <CoverPage plan={plan} />
+              </div>
+            ) : null}
+
+            <div className="flex flex-col">
+              {plan?.days?.map((day, i, arr) => (
+                <div
+                  key={day.dayNumber}
+                  className={i !== arr.length - 1 ? "border-b-2 border-dashed border-line/20" : ""}
+                >
+                  <DayPage day={day} />
+                </div>
+              ))}
+            </div>
+
+            {plan?.budget?.total ? (
+              <div className="border-t-2 border-dashed border-line/20">
+                <BudgetPage budget={plan.budget} />
+              </div>
+            ) : null}
+
+            {!plan?.days?.length ? (
+              <div className="flex items-center justify-center text-sm text-muted h-40">
+                まだ予定がありません
+              </div>
+            ) : null}
           </div>
-        ) : null}
+        </div>
       </div>
     </AppShell>
   );

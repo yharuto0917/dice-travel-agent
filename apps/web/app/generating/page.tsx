@@ -19,6 +19,7 @@ import {
   TRAVEL_AGENT_NAME,
 } from "@/lib/agent";
 import { FLOW_STEPS } from "@/lib/flow";
+import { addHistoryEntry } from "@/lib/history";
 import { cn } from "@/lib/utils";
 
 const STEP_INDEX = 3; // 計画作成中（4ステップ目）
@@ -27,6 +28,8 @@ function GeneratingInner({ planId }: { planId: string }) {
   // Agent の state は onStateUpdate で受け取り、ローカルに反映して再描画する。
   const [state, setState] = useState<AgentState | null>(null);
   const startedRef = useRef(false);
+  // 履歴の Cookie 保存は一度だけ（onStateUpdate は完了後も複数回発火しうるため）。
+  const savedRef = useRef(false);
 
   const agent = useAgent<AgentState>({
     agent: TRAVEL_AGENT_NAME,
@@ -56,6 +59,17 @@ function GeneratingInner({ planId }: { planId: string }) {
   const pendingQuestions = (state?.questions ?? []).filter((q) => q.status === "pending");
   const isDone = phase === "done";
   const isError = phase === "error";
+
+  // 生成成功時に、Home 画面の作成履歴として Cookie へ1件だけ記録する（#57）。
+  useEffect(() => {
+    if (!isDone || savedRef.current) return;
+    savedRef.current = true;
+    addHistoryEntry({
+      id: planId,
+      title: plan?.title ?? "無題の旅",
+      createdAt: new Date().toISOString(),
+    });
+  }, [isDone, plan?.title, planId]);
 
   return (
     <AppShell title="計画作成中" back={{ href: "/conditions" }}>

@@ -20,13 +20,13 @@ describe("llm/provider", () => {
 
   it("should default to the supervisor model", () => {
     const llm = createLlm(env);
-    expect(llm.modelId).toBe("gemini-3.5-flash");
+    expect(llm.modelId).toBe("gemini-3.6-flash");
     expect(llm.modelId).toBe(SUPERVISOR_MODEL_ID);
     expect(llm.provider).toBe("google.generative-ai");
   });
 
   it("should use the subagent model when specified", () => {
     const llm = createLlm(env, SUBAGENT_MODEL_ID);
-    expect(llm.modelId).toBe("gemini-3.1-flash-lite");
+    expect(llm.modelId).toBe("gemini-3.5-flash-lite");
   });
 });

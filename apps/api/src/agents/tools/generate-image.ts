@@ -5,11 +5,11 @@ import type {
 import { google } from "@ai-sdk/google";
 import { generateImage, generateText, stepCountIs } from "ai";
 import type { Bindings } from "../../env";
-import { createImageModel, createLlm } from "../llm/provider";
+import { createImageModel, createLlm, SUPERVISOR_MODEL_ID } from "../llm/provider";
 import type { GeneratedImage } from "./context";
 
 /** 画像生成モデル（#18）。 */
-const PROMPT_GENERATE_MODEL_ID = "gemini-3.5-flash";
+const PROMPT_GENERATE_MODEL_ID = SUPERVISOR_MODEL_ID;
 const IMAGE_MODEL_ID = "gemini-3.1-flash-image";
 
 /**

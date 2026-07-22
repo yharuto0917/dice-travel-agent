@@ -2,9 +2,9 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import type { Bindings } from "../../env";
 
 /** Supervisor（統括の day-planner）用モデル。ツール統括・最終構造化の品質を担う。 */
-export const SUPERVISOR_MODEL_ID = "gemini-3.5-flash";
+export const SUPERVISOR_MODEL_ID = "gemini-3.6-flash";
 /** サブエージェント（research/enhancement/factcheck/summarize）用の軽量モデル。 */
-export const SUBAGENT_MODEL_ID = "gemini-3.1-flash-lite";
+export const SUBAGENT_MODEL_ID = "gemini-3.5-flash-lite";
 
 /** 既定モデル（明示指定が無い場合は Supervisor 用）。 */
 export const GEMINI_MODEL_ID = SUPERVISOR_MODEL_ID;

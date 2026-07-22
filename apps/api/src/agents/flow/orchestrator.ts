@@ -236,7 +236,7 @@ export async function runDay(
     providerOptions: {
       google: {
         thinkingConfig: {
-          // Supervisor（統括の day-planner）は gemini-3.5-flash を high で動かす。
+          // Supervisor（統括の day-planner）は gemini-3.6-flash を high で動かす。
           thinkingLevel: "high",
           includeThoughts: true,
         },

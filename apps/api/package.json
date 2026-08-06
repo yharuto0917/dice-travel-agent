@@ -19,6 +19,7 @@
   "type": "module",
   "dependencies": {
     "@ai-sdk/google": "^3.0.83",
+    "@cloudflare/ai-chat": "^0.8.6",
     "@hono/zod-validator": "^0.8.0",
     "@repo/shared": "workspace:*",
     "agents": "^0.16.2",

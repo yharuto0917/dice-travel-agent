@@ -88,6 +88,9 @@ const MAX_DESC_LEN = 800;
 function clampText(s: string | undefined, max: number): string | undefined {
   if (s === undefined) return undefined;
   const t = s.trim();
+  // 空白だけの値は「無い」と同じ扱いにする（description に "" が残ると UI 側の
+  // 有無判定はすり抜けるのに何も表示されない、という分かりにくい状態になる）。
+  if (t === "") return undefined;
   return t.length > max ? t.slice(0, max).trimEnd() : t;
 }
 
@@ -118,12 +121,19 @@ const MAX_IMAGES_PER_DAY = 6;
  *
  * 観光名所（{@link IMAGE_TARGET_TYPES} = `spot`）のうち、まだ image を持たないものを上限まで採る。
  * 食事・宿・移動・体験・自由時間には生成しない。観光名所を1件も含まない日は画像なしになる。
+ *
+ * `limit` は生成枚数の上限。既定は1日あたりの上限だが、チャットの修正経路のように
+ * 「修正1回あたり」で予算を配る呼び出し側が、残り枚数を渡して絞り込めるようにしている。
  */
-export function selectImageTargets(items: PlanItem[]): { index: number; item: PlanItem }[] {
+export function selectImageTargets(
+  items: PlanItem[],
+  limit: number = MAX_IMAGES_PER_DAY,
+): { index: number; item: PlanItem }[] {
+  if (limit <= 0) return [];
   return items
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => !item.image && IMAGE_TARGET_TYPES.has(item.type))
-    .slice(0, MAX_IMAGES_PER_DAY);
+    .slice(0, limit);
 }
 
 /**
@@ -437,7 +447,7 @@ async function structureDay(
         } satisfies GoogleGenerativeAIProviderOptions,
       },
       system:
-        "あなたは1日分の旅行旅程を構造化 PlanDay として組み立てる専門家です。妥当な startTime を付けた4〜7件の、現実的で順序立てた予定（観光スポット・食事・移動など）を必ず作成してください。優先順位は次の通りです: (1) ツールデータにある実在の名称・住所を最優先で使う。(2) ツールデータが不足している場合は、目的地に実在するよく知られた観光スポット・飲食店・名所をあなたの知識から補う。架空の場所を作ってはいけませんが、items を空にすることは絶対に禁止です——必ず具体的な予定で埋めてください。前日までに訪問済みのスポット・飲食店は再訪・重複させず、前日の最終地点・宿泊地から自然につながる動線にし、旅行全体の予算を意識すること。スキーマや検証に関するメタ的な文言をどのフィールドにも書かないこと。出力（title・description・各 item の名称など、すべての自然言語フィールド）は必ず日本語で記述してください。`title` は『N日目』のような短いラベルにしてください。",
+        "あなたは1日分の旅行旅程を構造化 PlanDay として組み立てる専門家です。妥当な startTime を付けた4〜7件の、現実的で順序立てた予定（観光スポット・食事・移動など）を必ず作成してください。優先順位は次の通りです: (1) ツールデータにある実在の名称・住所を最優先で使う。(2) ツールデータが不足している場合は、目的地に実在するよく知られた観光スポット・飲食店・名所をあなたの知識から補う。架空の場所を作ってはいけませんが、items を空にすることは絶対に禁止です——必ず具体的な予定で埋めてください。各 item には `description`（日本語1〜2文の詳細説明）を必ず付け、しおりの読者向けに「そこで何をするか」「見どころ・名物」を具体的に書くこと（タイトルの言い換えや空文字は不可）。前日までに訪問済みのスポット・飲食店は再訪・重複させず、前日の最終地点・宿泊地から自然につながる動線にし、旅行全体の予算を意識すること。スキーマや検証に関するメタ的な文言をどのフィールドにも書かないこと。出力（title・description・各 item の名称など、すべての自然言語フィールド）は必ず日本語で記述してください。`title` は『N日目』のような短いラベルにしてください。",
       prompt: `対象は ${n}日目です。\n\n旅行のコンテキスト:\n${contextBlock}\n\nこれまでに確定した日程（重複させない／動線をつなぐ）:\n${priorBlock}\n\nプランナーのメモ:\n${plannerText || "(なし)"}\n\nツールで収集したデータ:\n${dataBlock}`,
     });
     // 生成スキーマ（フラット）→ 保存スキーマ（union）。type により union のいずれかを

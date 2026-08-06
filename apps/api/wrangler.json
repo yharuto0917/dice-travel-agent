@@ -18,9 +18,15 @@
     "binding": "AI"
   },
   "durable_objects": {
-    "bindings": [{ "name": "TravelPlanningAgent", "class_name": "TravelPlanningAgent" }]
+    "bindings": [
+      { "name": "TravelPlanningAgent", "class_name": "TravelPlanningAgent" },
+      { "name": "TravelChatAgent", "class_name": "TravelChatAgent" }
+    ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TravelPlanningAgent"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["TravelPlanningAgent"] },
+    { "tag": "v2", "new_sqlite_classes": ["TravelChatAgent"] }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

@@ -3,12 +3,17 @@
 import { ArrowClockwise, WarningCircle } from "@phosphor-icons/react";
 import type { GetPlanResponse } from "@repo/shared";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { ChatAccessGate } from "@/components/chat/chat-access-gate";
+import { ChatDock } from "@/components/chat/chat-dock";
+import { TravelChat } from "@/components/chat/travel-chat";
 import { BudgetPage } from "@/components/itinerary/BudgetPage";
 import { CoverPage } from "@/components/itinerary/CoverPage";
 import { DayPage } from "@/components/itinerary/DayPage";
 import { AppShell } from "@/components/layout/app-shell";
 import { getPlan } from "@/lib/api";
+import { clearChatAccess, loadChatAccess } from "@/lib/chat-access-token";
+import { useTravelChat } from "@/lib/hooks/use-travel-chat";
 
 type LoadState =
   | { status: "loading" }
@@ -17,20 +22,42 @@ type LoadState =
 
 function ItineraryInner({ planId }: { planId: string }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  // 常駐チャットの接続トークン。生成直後は conditions 画面が保存済み、
+  // それ以外（履歴・URL 直開き・期限切れ）は ChatAccessGate で取り直す。
+  const [chatToken, setChatToken] = useState<string | null>(null);
+  const [tokenResolved, setTokenResolved] = useState(false);
+
+  /**
+   * 計画を D1 から取り直す。初回表示とチャットの修正適用後で共用する。
+   * 再取得中は旧内容を表示したままにして、しおりがチラつかないようにする。
+   */
+  const reload = useCallback(async () => {
+    try {
+      const data = await getPlan(planId);
+      setState({ status: "ready", data });
+    } catch (e) {
+      // 初回表示前の失敗はエラー画面へ。取得済みの内容があるなら残したまま黙って諦める。
+      setState((prev) =>
+        prev.status === "ready" ? prev : { status: "error", message: String(e) },
+      );
+    }
+  }, [planId]);
 
   useEffect(() => {
-    let cancelled = false;
     setState({ status: "loading" });
-    getPlan(planId)
-      .then((data) => {
-        if (!cancelled) setState({ status: "ready", data });
-      })
-      .catch((e) => {
-        if (!cancelled) setState({ status: "error", message: String(e) });
-      });
-    return () => {
-      cancelled = true;
-    };
+    void reload();
+  }, [reload]);
+
+  // sessionStorage は SSR 中に触れないため、マウント後に一度だけ解決する。
+  useEffect(() => {
+    setChatToken(loadChatAccess(planId)?.token ?? null);
+    setTokenResolved(true);
+  }, [planId]);
+
+  const handleUnauthorized = useCallback(() => {
+    // サーバに拒否されたトークンは保持しておく意味がないので捨て、gate を出し直す。
+    clearChatAccess(planId);
+    setChatToken(null);
   }, [planId]);
 
   if (state.status === "loading") {
@@ -56,6 +83,8 @@ function ItineraryInner({ planId }: { planId: string }) {
   }
 
   const plan = state.data.plan;
+  // 計画が完成するまでチャットは出さない（修正対象が確定していない）。
+  const chatReady = state.data.status === "completed" && plan !== null;
 
   return (
     <AppShell title="旅のしおり" back={{ href: "/" }}>
@@ -109,8 +138,68 @@ function ItineraryInner({ planId }: { planId: string }) {
             ) : null}
           </div>
         </div>
+
+        {/* トークンが無い／失効したときは、チャットの前に人間性検証を挟む（#20）。 */}
+        {chatReady && tokenResolved && !chatToken ? (
+          <ChatAccessGate planId={planId} onGranted={setChatToken} />
+        ) : null}
       </div>
+
+      {chatReady && chatToken ? (
+        <ItineraryChat
+          planId={planId}
+          token={chatToken}
+          displayedVersion={state.data.version}
+          onUnauthorized={handleUnauthorized}
+          onPlanApplied={reload}
+        />
+      ) : null}
     </AppShell>
+  );
+}
+
+/**
+ * 常駐チャットのドック（#20）。
+ *
+ * `useTravelChat` はトークンが確定してから呼ぶ必要があるため、条件分岐の内側で
+ * マウントできるよう別コンポーネントに切り出す（フックを条件付きで呼ばないため）。
+ */
+function ItineraryChat({
+  planId,
+  token,
+  displayedVersion,
+  onUnauthorized,
+  onPlanApplied,
+}: {
+  planId: string;
+  token: string;
+  /** いま画面に描いている計画のバージョン。 */
+  displayedVersion: number;
+  onUnauthorized: () => void;
+  /** 修正が適用されたときに、しおり表示を D1 から取り直す。 */
+  onPlanApplied: () => void;
+}) {
+  const chat = useTravelChat({ planId, token, onUnauthorized, onPlanMaybeChanged: onPlanApplied });
+  const appliedVersion = chat.state?.appliedVersion ?? null;
+
+  /**
+   * 修正の承認は Agent 側で D1 を更新する。表示は D1 を単一の真実として取り直し、
+   * Agent state をそのまま描画しない（バージョン復元など他経路の変更も拾えるため）。
+   *
+   * 判定は「Agent が適用したと言うバージョン」と「いま描いているバージョン」の比較で行う。
+   * `appliedVersion` の変化を追う方式だと、DO state に前回セッションの値が残っている場合に
+   * 同じ値が再送されて再取得が起きず、しおりが古いまま取り残される。
+   */
+  useEffect(() => {
+    if (appliedVersion === null) return;
+    if (appliedVersion === displayedVersion) return;
+    onPlanApplied();
+  }, [appliedVersion, displayedVersion, onPlanApplied]);
+
+  return (
+    <ChatDock title="旅のチャット" badge={chat.state?.pendingEdit != null}>
+      <TravelChat chat={chat} />
+    </ChatDock>
   );
 }
 

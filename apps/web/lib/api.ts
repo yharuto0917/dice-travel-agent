@@ -67,8 +67,10 @@ export function fetchClientId(): Promise<{ clientId: string }> {
 }
 
 import type {
-  ChatMessage,
+  ChatHistoryResponse,
+  CreateChatAccessResponse,
   CreatePlanRequest,
+  CreatePlanResponse,
   GetPlanResponse,
   PlanDiff,
   PlanVersionMeta,
@@ -127,7 +129,7 @@ async function throwForStatus(res: Response): Promise<void> {
 export async function createPlan(
   data: CreatePlanRequest,
   turnstileToken?: string | null,
-): Promise<{ id: string }> {
+): Promise<CreatePlanResponse> {
   const headers: Record<string, string> = {};
   if (turnstileToken) headers[TURNSTILE_TOKEN_HEADER] = turnstileToken;
 
@@ -137,7 +139,25 @@ export async function createPlan(
     headers,
   });
   await throwForStatus(res);
-  return res.json() as Promise<{ id: string }>;
+  return res.json() as Promise<CreatePlanResponse>;
+}
+
+/**
+ * 常駐チャットの接続トークンを発行する（#20）。
+ *
+ * 生成フローを経ずにしおりへ入った場合（Home の作成履歴・URL 直開き）に使う。
+ * 計画作成時（`createPlan`）は同じ Turnstile 検証の中でトークンが返るため不要。
+ */
+export async function createChatAccess(
+  planId: string,
+  turnstileToken?: string | null,
+): Promise<CreateChatAccessResponse> {
+  const headers: Record<string, string> = {};
+  if (turnstileToken) headers[TURNSTILE_TOKEN_HEADER] = turnstileToken;
+
+  const res = await apiFetch(`/plans/${planId}/chat-access`, { method: "POST", headers });
+  await throwForStatus(res);
+  return res.json() as Promise<CreateChatAccessResponse>;
 }
 
 /** 当日（JST）のスコープ別レート制限の残回数・リセット時刻を取得する（#17）。 */
@@ -145,22 +165,22 @@ export function getRateLimits(): Promise<RateLimitsResponse> {
   return apiJson<RateLimitsResponse>("/rate-limits");
 }
 
-/** 計画のチャット履歴を取得する（#20）。 */
-export function getChatMessages(id: string): Promise<{ messages: ChatMessage[] }> {
-  return apiJson<{ messages: ChatMessage[] }>(`/plans/${id}/chat`);
-}
-
-/** チャットメッセージを送信する（チャット 20回/日のレート制限あり, #17）。 */
-export async function sendChatMessage(
+/**
+ * チャット履歴（D1 アーカイブ）を取得する（#20）。
+ *
+ * ライブ会話は Chat Agent が持つため、ここは「Agent の保持上限より古い履歴」を
+ * さかのぼるための読み出し。`before` に前回の `nextCursor` を渡して1ページずつ遡る。
+ * メッセージ送信は Chat Agent（`useAgentChat`）が担うので HTTP の送信APIは無い。
+ */
+export function getChatMessages(
   id: string,
-  content: string,
-): Promise<{ message: ChatMessage }> {
-  const res = await apiFetch(`/plans/${id}/chat`, {
-    method: "POST",
-    body: JSON.stringify({ content }),
-  });
-  await throwForStatus(res);
-  return res.json() as Promise<{ message: ChatMessage }>;
+  options?: { limit?: number; before?: string },
+): Promise<ChatHistoryResponse> {
+  const params = new URLSearchParams();
+  if (options?.limit) params.set("limit", String(options.limit));
+  if (options?.before) params.set("before", options.before);
+  const query = params.size > 0 ? `?${params.toString()}` : "";
+  return apiJson<ChatHistoryResponse>(`/plans/${id}/chat${query}`);
 }
 
 /** 計画を取得する（しおり表示・D1 が単一の真実, #16）。 */

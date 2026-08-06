@@ -9,6 +9,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { TurnstileWidget } from "@/components/turnstile-widget";
 import { Button } from "@/components/ui/button";
 import { createPlan, getRateLimits, RateLimitError, TurnstileError } from "@/lib/api";
+import { saveChatAccess } from "@/lib/chat-access-token";
 import { FLOW_STEPS } from "@/lib/flow";
 import { useDiceStore } from "@/lib/stores/diceStore";
 import { cn } from "@/lib/utils";
@@ -109,6 +110,13 @@ export default function ConditionsPage() {
       );
     },
     onSuccess: (data) => {
+      // このリクエストは Turnstile を通っているため、しおりの常駐チャット（#20）用の
+      // 接続トークンも一緒に受け取っている。ここで保存しておけば、生成完了後に
+      // しおりへ移ったときに同じ人へ再チャレンジを要求しない。
+      saveChatAccess(data.id, {
+        token: data.chatAccessToken,
+        expiresAt: data.expiresAt,
+      });
       router.push(`/generating?planId=${data.id}`);
     },
   });

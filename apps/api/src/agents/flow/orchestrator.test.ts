@@ -42,6 +42,15 @@ describe("selectImageTargets", () => {
   it("観光名所を含まない日は空", () => {
     expect(selectImageTargets(items(["meal", "transport", "free"]))).toEqual([]);
   });
+
+  it("limit を渡すとその枚数で打ち切る（修正経路の残り枠）", () => {
+    const targets = selectImageTargets(items(["spot", "spot", "spot"]), 2);
+    expect(targets.map((t) => t.index)).toEqual([0, 1]);
+  });
+
+  it("limit が 0 以下なら何も選ばない（枠を使い切った状態）", () => {
+    expect(selectImageTargets(items(["spot", "spot"]), 0)).toEqual([]);
+  });
 });
 
 describe("imageSubject", () => {

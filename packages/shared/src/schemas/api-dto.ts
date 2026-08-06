@@ -107,6 +107,37 @@ export const CreatePlanRequestSchema = z.object({
 });
 export type CreatePlanRequest = z.infer<typeof CreatePlanRequestSchema>;
 
+/**
+ * 計画作成レスポンス（POST /plans, #20）。
+ *
+ * 生成リクエストは Turnstile 検証を通っているため、同じ検証結果からこの計画専用の
+ * chat access token を併せて発行する。これによりしおり到達時に同じ人へ再チャレンジを
+ * 要求せずに常駐チャットへ接続できる。
+ */
+export const CreatePlanResponseSchema = z.object({
+  id: z.string(),
+  chatAccessToken: z.string(),
+  /** トークンの有効期限(ISO)。クライアントは期限切れを検知して再取得する。 */
+  expiresAt: z.string(),
+});
+export type CreatePlanResponse = z.infer<typeof CreatePlanResponseSchema>;
+
+/**
+ * chat access token を Chat Agent への接続 URL に載せるクエリパラメータ名（#20）。
+ * サーバの認可ゲートとクライアントの `useAgent` で必ず同じ名前を使う。
+ */
+export const CHAT_ACCESS_QUERY_PARAM = "chatToken";
+
+/**
+ * chat access token 発行レスポンス（POST /plans/:id/chat-access, #20）。
+ * Home の作成履歴や URL 直開きなど、生成フローを経ずに入る場合に使う。
+ */
+export const CreateChatAccessResponseSchema = z.object({
+  chatAccessToken: z.string(),
+  expiresAt: z.string(),
+});
+export type CreateChatAccessResponse = z.infer<typeof CreateChatAccessResponseSchema>;
+
 /** 計画取得レスポンス（GET /plans/:id, #16）。`plan` は完成前は下書き。 */
 export const GetPlanResponseSchema = z.object({
   id: z.string(),
@@ -167,3 +198,54 @@ export const ChatMessageSchema = z.object({
   createdAt: z.string(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+
+/** チャット履歴の上限（1ページ）。DO SQLite より古い分は D1 アーカイブから読み足す。 */
+export const CHAT_HISTORY_DEFAULT_LIMIT = 20;
+export const CHAT_HISTORY_MAX_LIMIT = 50;
+
+/**
+ * チャット履歴取得のクエリ（GET /plans/:id/chat, #20）。
+ * `before` は前ページの `nextCursor` をそのまま渡す opaque cursor。
+ */
+export const ChatHistoryQuerySchema = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(CHAT_HISTORY_MAX_LIMIT)
+    .default(CHAT_HISTORY_DEFAULT_LIMIT),
+  before: z.string().optional(),
+});
+export type ChatHistoryQuery = z.infer<typeof ChatHistoryQuerySchema>;
+
+/**
+ * チャット履歴レスポンス（#20）。`messages` は表示順（古い順）で返す。
+ * `nextCursor` が null ならそれ以上古い履歴は無い。
+ */
+export const ChatHistoryResponseSchema = z.object({
+  messages: z.array(ChatMessageSchema),
+  nextCursor: z.string().nullable(),
+});
+export type ChatHistoryResponse = z.infer<typeof ChatHistoryResponseSchema>;
+
+/**
+ * チャットのストリームに載せる transient data（#20）。
+ *
+ * `useAgentChat` の `onData` で受け取る。メッセージ本文として永続化したくない
+ * 「実行中の状況」「提案が state に載った合図」「レート制限」をここで運ぶ。
+ * `type` は AI SDK の UI message stream の実際の形（`data-<name>`）に合わせる。
+ */
+export const ChatDataPartSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("data-activity"), data: z.object({ label: z.string() }) }),
+  z.object({ type: z.literal("data-proposal"), data: z.object({ editId: z.string() }) }),
+  z.object({ type: z.literal("data-rate-limit"), data: RateLimitStatusSchema }),
+  /**
+   * 修正案づくりの思考過程。`text` はその時点までの**全文**（差分ではない）。
+   *
+   * 質問応答の思考は assistant メッセージの reasoning パートとして流れるが、修正案づくりは
+   * メッセージを組み立てずに進むため、思考を載せる先が無い。ここで transient data として運ぶ。
+   * 差分ではなく全文にするのは、順序の入れ替わりや取りこぼしで思考が崩れないようにするため。
+   */
+  z.object({ type: z.literal("data-reasoning"), data: z.object({ text: z.string() }) }),
+]);
+export type ChatDataPart = z.infer<typeof ChatDataPartSchema>;

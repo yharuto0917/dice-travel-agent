@@ -22,9 +22,10 @@ type LoadState =
 
 function ItineraryInner({ planId }: { planId: string }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
-  // 常駐チャットの接続トークン。生成直後は conditions 画面が保存済み、
+  // 常駐チャットの接続許可。token 本体は HttpOnly Cookie、ここは期限内かの UI 状態だけ。
+  // 生成直後は conditions 画面が保存済み、
   // それ以外（履歴・URL 直開き・期限切れ）は ChatAccessGate で取り直す。
-  const [chatToken, setChatToken] = useState<string | null>(null);
+  const [chatAccessReady, setChatAccessReady] = useState(false);
   const [tokenResolved, setTokenResolved] = useState(false);
 
   /**
@@ -50,14 +51,14 @@ function ItineraryInner({ planId }: { planId: string }) {
 
   // sessionStorage は SSR 中に触れないため、マウント後に一度だけ解決する。
   useEffect(() => {
-    setChatToken(loadChatAccess(planId)?.token ?? null);
+    setChatAccessReady(loadChatAccess(planId) !== null);
     setTokenResolved(true);
   }, [planId]);
 
   const handleUnauthorized = useCallback(() => {
-    // サーバに拒否されたトークンは保持しておく意味がないので捨て、gate を出し直す。
+    // サーバに拒否された許可マーカーは捨て、gate を出し直す。
     clearChatAccess(planId);
-    setChatToken(null);
+    setChatAccessReady(false);
   }, [planId]);
 
   if (state.status === "loading") {
@@ -139,16 +140,15 @@ function ItineraryInner({ planId }: { planId: string }) {
           </div>
         </div>
 
-        {/* トークンが無い／失効したときは、チャットの前に人間性検証を挟む（#20）。 */}
-        {chatReady && tokenResolved && !chatToken ? (
-          <ChatAccessGate planId={planId} onGranted={setChatToken} />
+        {/* 接続許可が無い／失効したときは、チャットの前に人間性検証を挟む（#20）。 */}
+        {chatReady && tokenResolved && !chatAccessReady ? (
+          <ChatAccessGate planId={planId} onGranted={() => setChatAccessReady(true)} />
         ) : null}
       </div>
 
-      {chatReady && chatToken ? (
+      {chatReady && chatAccessReady ? (
         <ItineraryChat
           planId={planId}
-          token={chatToken}
           displayedVersion={state.data.version}
           onUnauthorized={handleUnauthorized}
           onPlanApplied={reload}
@@ -161,25 +161,23 @@ function ItineraryInner({ planId }: { planId: string }) {
 /**
  * 常駐チャットのドック（#20）。
  *
- * `useTravelChat` はトークンが確定してから呼ぶ必要があるため、条件分岐の内側で
+ * `useTravelChat` は接続許可が確定してから呼ぶ必要があるため、条件分岐の内側で
  * マウントできるよう別コンポーネントに切り出す（フックを条件付きで呼ばないため）。
  */
 function ItineraryChat({
   planId,
-  token,
   displayedVersion,
   onUnauthorized,
   onPlanApplied,
 }: {
   planId: string;
-  token: string;
   /** いま画面に描いている計画のバージョン。 */
   displayedVersion: number;
   onUnauthorized: () => void;
   /** 修正が適用されたときに、しおり表示を D1 から取り直す。 */
   onPlanApplied: () => void;
 }) {
-  const chat = useTravelChat({ planId, token, onUnauthorized, onPlanMaybeChanged: onPlanApplied });
+  const chat = useTravelChat({ planId, onUnauthorized, onPlanMaybeChanged: onPlanApplied });
   const appliedVersion = chat.state?.appliedVersion ?? null;
 
   /**

@@ -12,8 +12,13 @@ export class ImageClient extends ApiClientBase {
   private unsplashAccessKey?: string;
   private pexelsApiKey?: string;
 
-  constructor(config: { unsplashAccessKey?: string; pexelsApiKey?: string; kv?: KVNamespace }) {
-    super(config.kv);
+  constructor(config: {
+    unsplashAccessKey?: string;
+    pexelsApiKey?: string;
+    kv?: KVNamespace;
+    abortSignal?: AbortSignal;
+  }) {
+    super(config.kv, config.abortSignal);
     this.unsplashAccessKey = config.unsplashAccessKey;
     this.pexelsApiKey = config.pexelsApiKey;
   }

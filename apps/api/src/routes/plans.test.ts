@@ -3,24 +3,12 @@ import { type ChatCursor, decodeCursor, encodeCursor } from "./plans";
 
 describe("routes/plans チャット履歴の cursor", () => {
   it("往復して同じ値へ戻る", () => {
-    const cursor: ChatCursor = { createdAt: "2026-07-30 10:00:00", id: "b1" };
+    const cursor: ChatCursor = { createdAt: "2026-08-06T17:00:00.123Z", id: "b1" };
     expect(decodeCursor(encodeCursor(cursor))).toEqual(cursor);
   });
 
-  it("空白を含む D1 の CURRENT_TIMESTAMP でも境界がずれない", () => {
-    // D1 の既定値は "YYYY-MM-DD HH:MM:SS"。区切り文字で連結すると日付だけを日時と
-    // 誤読してページ境界がずれ、履歴の重複・欠落が起きる。
-    const cursor: ChatCursor = { createdAt: "2026-07-30 23:59:59", id: "a-b-c" };
-    const decoded = decodeCursor(encodeCursor(cursor));
-    expect(decoded?.createdAt).toBe("2026-07-30 23:59:59");
-    expect(decoded?.id).toBe("a-b-c");
-  });
-
-  it("UUID のように区切り文字を含む id も保持する", () => {
-    const cursor: ChatCursor = {
-      createdAt: "2026-07-30 10:00:00",
-      id: "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
-    };
+  it("ミリ秒時刻とidをページ境界に保持する", () => {
+    const cursor = { createdAt: "2026-08-06T17:00:00.001Z", id: "assistant-1" };
     expect(decodeCursor(encodeCursor(cursor))).toEqual(cursor);
   });
 
@@ -36,6 +24,6 @@ describe("routes/plans チャット履歴の cursor", () => {
 
   it("空文字を含む cursor は無効として扱う", () => {
     expect(decodeCursor(btoa(JSON.stringify(["", "id"])))).toBeNull();
-    expect(decodeCursor(btoa(JSON.stringify(["2026-07-30 10:00:00", ""])))).toBeNull();
+    expect(decodeCursor(btoa(JSON.stringify(["2026-08-06T17:00:00.000Z", ""])))).toBeNull();
   });
 });

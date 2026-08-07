@@ -116,24 +116,16 @@ export type CreatePlanRequest = z.infer<typeof CreatePlanRequestSchema>;
  */
 export const CreatePlanResponseSchema = z.object({
   id: z.string(),
-  chatAccessToken: z.string(),
-  /** トークンの有効期限(ISO)。クライアントは期限切れを検知して再取得する。 */
+  /** HttpOnly Cookie の有効期限(ISO)。クライアントは期限切れを検知して再取得する。 */
   expiresAt: z.string(),
 });
 export type CreatePlanResponse = z.infer<typeof CreatePlanResponseSchema>;
-
-/**
- * chat access token を Chat Agent への接続 URL に載せるクエリパラメータ名（#20）。
- * サーバの認可ゲートとクライアントの `useAgent` で必ず同じ名前を使う。
- */
-export const CHAT_ACCESS_QUERY_PARAM = "chatToken";
 
 /**
  * chat access token 発行レスポンス（POST /plans/:id/chat-access, #20）。
  * Home の作成履歴や URL 直開きなど、生成フローを経ずに入る場合に使う。
  */
 export const CreateChatAccessResponseSchema = z.object({
-  chatAccessToken: z.string(),
   expiresAt: z.string(),
 });
 export type CreateChatAccessResponse = z.infer<typeof CreateChatAccessResponseSchema>;
@@ -206,6 +198,8 @@ export const CHAT_HISTORY_MAX_LIMIT = 50;
 /**
  * チャット履歴取得のクエリ（GET /plans/:id/chat, #20）。
  * `before` は前ページの `nextCursor` をそのまま渡す opaque cursor。
+ * 初回の `beforeMessageId` は DO が保持する最古の live message id。サーバが D1 上の
+ * 保存時刻とidを解決し、その直前から返す。
  */
 export const ChatHistoryQuerySchema = z.object({
   limit: z.coerce
@@ -215,6 +209,7 @@ export const ChatHistoryQuerySchema = z.object({
     .max(CHAT_HISTORY_MAX_LIMIT)
     .default(CHAT_HISTORY_DEFAULT_LIMIT),
   before: z.string().optional(),
+  beforeMessageId: z.string().min(1).optional(),
 });
 export type ChatHistoryQuery = z.infer<typeof ChatHistoryQuerySchema>;
 

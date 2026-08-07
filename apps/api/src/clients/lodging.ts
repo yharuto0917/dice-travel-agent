@@ -10,8 +10,8 @@ import { ApiClientBase } from "./base";
 export class LodgingClient extends ApiClientBase {
   private applicationId?: string;
 
-  constructor(config: { applicationId?: string; kv?: KVNamespace }) {
-    super(config.kv);
+  constructor(config: { applicationId?: string; kv?: KVNamespace; abortSignal?: AbortSignal }) {
+    super(config.kv, config.abortSignal);
     this.applicationId = config.applicationId;
   }
 

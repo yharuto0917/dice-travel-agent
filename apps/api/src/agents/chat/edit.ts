@@ -7,6 +7,7 @@ import {
   PlanItemGenSchema,
   type TravelPlan,
   type TravelPlanDraft,
+  TravelPlanSchema,
 } from "@repo/shared";
 import { generateObject, generateText, stepCountIs, streamText } from "ai";
 import { z } from "zod";
@@ -17,7 +18,7 @@ import { imageSubject, selectImageTargets } from "../flow/orchestrator";
 import { createLlm, SUBAGENT_MODEL_ID, SUPERVISOR_MODEL_ID } from "../llm/provider";
 import { buildTools } from "../tools";
 import type { GeneratedImage, ToolContext } from "../tools/context";
-import { generateItemImage } from "../tools/generate-image";
+import { deleteGeneratedImageKeys, generateItemImage } from "../tools/generate-image";
 import { checkPlan } from "../validation/checker";
 import { diffPlans } from "../validation/diff";
 import { fixPlan } from "../validation/fix";
@@ -51,6 +52,9 @@ const EDIT_FIX_ATTEMPTS = 1;
  * 据え置かれた予定の画像は {@link carryOverImages} が引き継ぐので、この枠は消費しない。
  */
 const MAX_EDIT_IMAGES = 2;
+
+/** 1発話で再生成できる日数。日ごとに最大4試行するため、総構造化生成を12回に抑える。 */
+export const MAX_EDIT_DAYS = 3;
 
 /**
  * 1日分の生成をやり直す順序（#20）。
@@ -106,12 +110,17 @@ export interface CreatePlanEditParams {
   onActivity?: (label: string) => void;
   /** 思考過程を UI へ通知する。呼ばれるたびに**その時点までの全文**が渡る。 */
   onReasoning?: (text: string) => void;
+  /** 切断・利用者キャンセルを全モデル・ツール・画像生成へ伝播する。 */
+  abortSignal?: AbortSignal;
 }
 
 /** 修正案生成の結果。検証を通らなかった場合は提案を作らない。 */
 export type EditResult =
   | { status: "ok"; edit: PendingPlanEdit }
-  | { status: "failed"; reason: "no_target" | "generation_failed" | "invalid_plan" };
+  | {
+      status: "failed";
+      reason: "no_target" | "too_many_targets" | "generation_failed" | "invalid_plan";
+    };
 
 /**
  * 修正対象の日を決める純関数。
@@ -125,6 +134,11 @@ export function resolveTargetDays(plan: TravelPlan, dayNumbers: number[]): numbe
   return dayNumbers.filter((n) => existing.has(n));
 }
 
+/** 生成コスト上限を超える対象日数か。 */
+export function exceedsEditDayLimit(dayNumbers: number[]): boolean {
+  return dayNumbers.length > MAX_EDIT_DAYS;
+}
+
 /**
  * 検証済みの修正案から `PendingPlanEdit` を組み立てる純関数。
  *
@@ -136,12 +150,14 @@ export function buildPendingEdit(
   proposed: TravelPlan,
   summary: string,
   now: Date = new Date(),
+  generatedImageKeys: string[] = [],
 ): PendingPlanEdit {
   return {
     id: crypto.randomUUID(),
     summary,
     proposedPlan: proposed,
     diff: diffPlans(current, proposed),
+    generatedImageKeys,
     createdAt: now.toISOString(),
   };
 }
@@ -167,11 +183,13 @@ async function summarizeEdit(
   env: Bindings,
   instruction: string,
   dayNumbers: number[],
+  abortSignal?: AbortSignal,
 ): Promise<string> {
   const fallback = `${dayNumbers.map((n) => `${n}日目`).join("・")}の予定を変更しました`;
   try {
     const { text } = await generateText({
       model: createLlm(env, SUBAGENT_MODEL_ID),
+      abortSignal,
       temperature: 0,
       maxOutputTokens: EDIT_SUMMARY_MAX_OUTPUT_TOKENS,
       maxRetries: 1,
@@ -184,6 +202,7 @@ async function summarizeEdit(
     });
     return cleanSummary(text) || fallback;
   } catch {
+    abortSignal?.throwIfAborted();
     return fallback;
   }
 }
@@ -254,7 +273,7 @@ export function sanitizeGeneratedDay(
   day: z.infer<typeof EditDayGenSchema>,
   dayNumber: number,
 ): PlanDay {
-  return {
+  const sanitized = {
     ...day,
     dayNumber,
     items: day.items.map(({ image: _image, ...item }) => ({
@@ -263,7 +282,10 @@ export function sanitizeGeneratedDay(
       description: clampText(item.description, MAX_DESC_LEN),
       startTime: normalizeStartTime(item.startTime),
     })),
-  } as PlanDay;
+  };
+  // 保存スキーマでは description が optional。空白から undefined へ落ちた値を
+  // 生成経路へ残さないよう、サニタイズ後に生成用スキーマで再検証する。
+  return PlanDayGenSchema.parse(sanitized) as PlanDay;
 }
 
 /**
@@ -278,19 +300,9 @@ export function isDegenerateDay(day: PlanDay): boolean {
   return distinct.size < MIN_ITEMS_PER_DAY;
 }
 
-/**
- * 画像を引き継ぐときの同一性キー。タイトルと場所名の両方を鍵にする。
- *
- * 修正では「昼食だけ差し替え」のように大半の予定が残るが、その場合でもモデルは
- * 表記を微妙に変える（全角空白・前後の空白など）。表記ゆれで引き継ぎに失敗すると
- * 無関係な再生成が走るため、空白を潰して比較する。
- */
-function imageCarryKeys(item: PlanItem): string[] {
-  const normalize = (value: string) => value.replace(/\s+/g, "").toLowerCase();
-  const keys = [normalize(item.title)];
-  const place = item.location?.name?.trim();
-  if (place) keys.push(normalize(place));
-  return keys;
+/** 画像同一性の比較用。表記ゆれを吸収する。 */
+function normalizeImageIdentity(value: string): string {
+  return value.replace(/\s+/g, "").toLowerCase();
 }
 
 /**
@@ -304,24 +316,45 @@ function imageCarryKeys(item: PlanItem): string[] {
 export function carryOverImages(previous: PlanDay | undefined, day: PlanDay): PlanDay {
   if (!previous) return day;
 
-  // タイトル・場所名の**どちらか**が一致すれば同じ場所とみなす。片方だけ持つ書き方
-  // （「首里城の見学」/ location=「首里城公園」）に修正の前後で揺れるため、両方を鍵にする。
-  const byKey = new Map<string, PlanItem["image"]>();
-  for (const item of previous.items) {
-    if (!item.image) continue;
-    for (const key of imageCarryKeys(item)) {
-      if (!byKey.has(key)) byKey.set(key, item.image);
-    }
-  }
-  if (byKey.size === 0) return day;
+  // 引き継ぎ元は「画像を持つ修正前の予定」。同じ鍵の予定が複数あっても捨てず、
+  // 鍵ごとの待ち行列に積んで先頭から1件ずつ引き当てる。同じ場所で2つ予定を組んだ日
+  // （例: 鳥取砂丘の散策 / 鳥取砂丘で夕日鑑賞）から画像が丸ごと消えるのを防ぐため。
+  const sources = previous.items.filter((item) => item.image);
+  if (sources.length === 0) return day;
+
+  // location がある item は location の一致だけで同一性を決める。同じ「美術館見学」でも
+  // A美術館→B美術館へ変わった場合に、title 単独でAの画像を付けない。
+  // location が無い item だけは title の一致へフォールバックする。
+  const byLocation = new Map<string, number[]>();
+  const byTitle = new Map<string, number[]>();
+  const enqueue = (map: Map<string, number[]>, key: string, index: number) => {
+    const queue = map.get(key);
+    if (queue) queue.push(index);
+    else map.set(key, [index]);
+  };
+  sources.forEach((item, index) => {
+    const location = item.location?.name?.trim();
+    if (location) enqueue(byLocation, normalizeImageIdentity(location), index);
+    enqueue(byTitle, normalizeImageIdentity(item.title), index);
+  });
+
+  // 1枚の画像を複数の予定へ貼らない（しおりに同じ写真が並ぶのを避ける）。
+  const used = new Set<number>();
+  const take = (candidates: number[] | undefined): PlanItem["image"] | undefined => {
+    const index = candidates?.find((candidate) => !used.has(candidate));
+    if (index === undefined) return undefined;
+    used.add(index);
+    return sources[index]?.image;
+  };
 
   return {
     ...day,
     items: day.items.map((item) => {
       if (item.image) return item;
-      const image = imageCarryKeys(item)
-        .map((key) => byKey.get(key))
-        .find((found) => found !== undefined);
+      const location = item.location?.name?.trim();
+      const image = location
+        ? take(byLocation.get(normalizeImageIdentity(location)))
+        : take(byTitle.get(normalizeImageIdentity(item.title)));
       return image ? { ...item, image } : item;
     }),
   };
@@ -429,10 +462,13 @@ async function researchDay(
   instruction: string,
   reasoning: ReasoningReporter,
   onActivity?: (label: string) => void,
+  abortSignal?: AbortSignal,
 ): Promise<string | null> {
   try {
+    abortSignal?.throwIfAborted();
     const result = streamText({
       model: createLlm(env, SUBAGENT_MODEL_ID),
+      abortSignal,
       system: EDIT_RESEARCH_SYSTEM,
       prompt: editResearchPrompt(plan, dayNumber, instruction),
       tools: buildTools(ctx),
@@ -464,6 +500,7 @@ async function researchDay(
 
     return buildResearchNotes(await result.text, toolOutputs);
   } catch {
+    abortSignal?.throwIfAborted();
     return null;
   }
 }
@@ -488,11 +525,14 @@ async function generateDay(
   instruction: string,
   notes: string | null,
   reasoning: ReasoningReporter,
+  abortSignal?: AbortSignal,
 ): Promise<PlanDay | null> {
   for (const { modelId, temperature } of EDIT_DAY_ATTEMPTS) {
     try {
+      abortSignal?.throwIfAborted();
       const { object, reasoning: thought } = await generateObject({
         model: createLlm(env, modelId),
+        abortSignal,
         schema: EditDayGenSchema,
         temperature,
         maxOutputTokens: EDIT_DAY_MAX_OUTPUT_TOKENS,
@@ -517,6 +557,7 @@ async function generateDay(
       if (isDegenerateDay(generated)) continue;
       return generated;
     } catch {
+      abortSignal?.throwIfAborted();
       // 次の温度で作り直す。全滅した場合だけ諦める。
     }
   }
@@ -538,8 +579,10 @@ async function generateEditImages(
   draft: TravelPlanDraft,
   dayNumbers: number[],
   onActivity?: (label: string) => void,
-): Promise<TravelPlanDraft> {
+  abortSignal?: AbortSignal,
+): Promise<{ draft: TravelPlanDraft; generatedImageKeys: string[] }> {
   const days = draft.days ?? [];
+  abortSignal?.throwIfAborted();
 
   // 対象日を順に見て、画像の無い観光スポットを枠が尽きるまで拾う。
   const picks: { dayNumber: number; index: number; item: PlanItem }[] = [];
@@ -552,17 +595,24 @@ async function generateEditImages(
       picks.push({ dayNumber, index: target.index, item: target.item });
     }
   }
-  if (picks.length === 0) return draft;
+  if (picks.length === 0) return { draft, generatedImageKeys: [] };
 
   onActivity?.("風景画像を生成しています…");
   // setup ステップで title は "${目的地}の旅" 形式。末尾の "の旅" を落として目的地名を得る。
   const destinationName = plan.title?.replace(/の旅$/, "").trim() || null;
 
-  const generated = await Promise.all(
+  // abort 時も全呼び出しの終了を待ち、成功済み key を漏れなく削除できるよう allSettled を使う。
+  const settled = await Promise.allSettled(
     picks.map((pick) =>
-      generateItemImage(env, imageSubject(pick.item, destinationName)).catch(() => null),
+      generateItemImage(env, imageSubject(pick.item, destinationName), abortSignal),
     ),
   );
+  const generated = settled.map((result) => (result.status === "fulfilled" ? result.value : null));
+  const generatedImageKeys = generated.flatMap((image) => (image ? [image.r2Key] : []));
+  if (abortSignal?.aborted) {
+    await deleteGeneratedImageKeys(env.BUCKET, generatedImageKeys);
+    abortSignal.throwIfAborted();
+  }
 
   // 「何日目の何番目」→ 生成画像。1枚も作れなかったら計画には触らない。
   const byPosition = new Map<string, GeneratedImage>();
@@ -570,19 +620,22 @@ async function generateEditImages(
     const image = generated[k];
     if (image) byPosition.set(`${pick.dayNumber}:${pick.index}`, image);
   });
-  if (byPosition.size === 0) return draft;
+  if (byPosition.size === 0) return { draft, generatedImageKeys: [] };
 
   return {
-    ...draft,
-    days: days.map((day) => ({
-      ...day,
-      items: day.items.map((item, index) => {
-        const image = byPosition.get(`${day.dayNumber}:${index}`);
-        return image
-          ? { ...item, image: { url: image.url, alt: image.prompt, generated: true } }
-          : item;
-      }),
-    })),
+    draft: {
+      ...draft,
+      days: days.map((day) => ({
+        ...day,
+        items: day.items.map((item, index) => {
+          const image = byPosition.get(`${day.dayNumber}:${index}`);
+          return image
+            ? { ...item, image: { url: image.url, alt: image.prompt, generated: true } }
+            : item;
+        }),
+      })),
+    },
+    generatedImageKeys,
   };
 }
 
@@ -606,9 +659,11 @@ export async function createPlanEdit(
   ctx: ToolContext,
   params: CreatePlanEditParams,
 ): Promise<EditResult> {
-  const { plan, instruction, dayNumbers, onActivity, onReasoning } = params;
+  const { plan, instruction, dayNumbers, onActivity, onReasoning, abortSignal } = params;
+  abortSignal?.throwIfAborted();
   const targets = resolveTargetDays(plan, dayNumbers);
   if (targets.length === 0) return { status: "failed", reason: "no_target" };
+  if (exceedsEditDayLimit(targets)) return { status: "failed", reason: "too_many_targets" };
 
   // 思考は対象日をまたいで1本の流れとして見せる（日ごとに見出しで区切る）。
   const reasoning = createReasoningReporter(onReasoning);
@@ -616,6 +671,7 @@ export async function createPlanEdit(
   // 対象日は前の日の結果を踏まえて順に作る（動線・重複の整合を保つため並列にしない）。
   let draft: TravelPlanDraft = plan;
   for (const dayNumber of targets) {
+    abortSignal?.throwIfAborted();
     reasoning.section(`${dayNumber}日目の下調べ`);
     // 下調べは日ごとに1回だけ。生成の再試行では同じメモを使い回す（検索の重複を避ける）。
     const notes = await researchDay(
@@ -626,8 +682,18 @@ export async function createPlanEdit(
       instruction,
       reasoning,
       onActivity,
+      abortSignal,
     );
-    const day = await generateDay(env, plan, draft, dayNumber, instruction, notes, reasoning);
+    const day = await generateDay(
+      env,
+      plan,
+      draft,
+      dayNumber,
+      instruction,
+      notes,
+      reasoning,
+      abortSignal,
+    );
     if (!day) return { status: "failed", reason: "generation_failed" };
     // 据え置かれた予定の画像を戻してから合成する。新規生成の枠は、これで画像が
     // 付かなかった＝本当に増えた観光スポットだけに使う。
@@ -635,22 +701,47 @@ export async function createPlanEdit(
     draft = mergeDay(draft, carryOverImages(previous, day));
   }
 
-  // 新しく増えた観光スポットへ画像を付ける。検証（checkPlan / fixPlan）より前に置き、
-  // 提案としてプレビューされる計画に画像が含まれるようにする。
-  draft = await generateEditImages(env, plan, draft, targets, onActivity);
-
+  // 画像を作る前に計画本体を検証する。不採用の計画のために R2 object を作らない。
   const check = checkPlan(draft);
   let proposed: TravelPlan | null = check.valid && check.parsed ? check.parsed : null;
 
   if (!proposed) {
     try {
-      proposed = await fixPlan(env, draft, check.errors, EDIT_FIX_ATTEMPTS);
+      proposed = await fixPlan(env, draft, check.errors, EDIT_FIX_ATTEMPTS, abortSignal);
     } catch {
+      abortSignal?.throwIfAborted();
       proposed = null;
     }
   }
   if (!proposed) return { status: "failed", reason: "invalid_plan" };
 
-  const summary = await summarizeEdit(env, instruction, targets);
-  return { status: "ok", edit: buildPendingEdit(plan, proposed, summary) };
+  let generatedImageKeys: string[] = [];
+  try {
+    const withImages = await generateEditImages(
+      env,
+      plan,
+      proposed,
+      targets,
+      onActivity,
+      abortSignal,
+    );
+    generatedImageKeys = withImages.generatedImageKeys;
+
+    // 画像付与後にも完成スキーマを再検証し、保存直前の構造を確定する。
+    const reparsed = TravelPlanSchema.safeParse(withImages.draft);
+    if (!reparsed.success) {
+      await deleteGeneratedImageKeys(env.BUCKET, generatedImageKeys);
+      return { status: "failed", reason: "invalid_plan" };
+    }
+    proposed = reparsed.data;
+
+    const summary = await summarizeEdit(env, instruction, targets, abortSignal);
+    return {
+      status: "ok",
+      edit: buildPendingEdit(plan, proposed, summary, new Date(), generatedImageKeys),
+    };
+  } catch (error) {
+    await deleteGeneratedImageKeys(env.BUCKET, generatedImageKeys);
+    throw error;
+  }
 }

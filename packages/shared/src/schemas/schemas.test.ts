@@ -10,7 +10,7 @@ import { ImageRefSchema } from "./common";
 import { TripConditionsSchema } from "./conditions";
 import { DestinationCandidateSchema, DestinationCandidatesSchema } from "./destination";
 import { DiceStateSchema, MAX_REROLLS } from "./dice";
-import { TravelPlanSchema } from "./plan";
+import { PlanItemGenSchema, TravelPlanSchema } from "./plan";
 
 const candidate = (id: string) => ({
   id,
@@ -110,6 +110,16 @@ describe("TravelPlanSchema", () => {
   });
 });
 
+describe("PlanItemGenSchema", () => {
+  it("生成 item の description は空白だけでは受理しない", () => {
+    const base = { id: "i1", type: "spot", title: "首里城" } as const;
+    expect(() => PlanItemGenSchema.parse({ ...base, description: " \n\t " })).toThrow();
+    expect(
+      PlanItemGenSchema.parse({ ...base, description: " 王城跡を巡ります。 " }).description,
+    ).toBe("王城跡を巡ります。");
+  });
+});
+
 describe("AgentStateSchema", () => {
   it("既定状態は idle / 空の計画下書き", () => {
     const s = AgentStateSchema.parse({});
@@ -141,6 +151,7 @@ describe("PendingPlanEditSchema", () => {
     const parsed = PendingPlanEditSchema.parse(pendingEdit());
     expect(parsed.proposedPlan.status).toBe("draft");
     expect(parsed.diff.days).toEqual([]);
+    expect(parsed.generatedImageKeys).toEqual([]);
   });
 
   it("未完成の下書き（destination 欠落）は拒否する", () => {
@@ -187,6 +198,13 @@ describe("ChatHistoryQuerySchema", () => {
   it("limit 未指定なら既定値、文字列は数値へ変換する", () => {
     expect(ChatHistoryQuerySchema.parse({}).limit).toBe(20);
     expect(ChatHistoryQuerySchema.parse({ limit: "35" }).limit).toBe(35);
+  });
+
+  it("最古の live message id を初回境界として受理する", () => {
+    expect(ChatHistoryQuerySchema.parse({ beforeMessageId: "message-1" }).beforeMessageId).toBe(
+      "message-1",
+    );
+    expect(() => ChatHistoryQuerySchema.parse({ beforeMessageId: "" })).toThrow();
   });
 
   it("limit の上限を超える値は拒否する", () => {

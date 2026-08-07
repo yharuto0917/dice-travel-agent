@@ -123,6 +123,8 @@ export const PendingPlanEditSchema = z.object({
   proposedPlan: TravelPlanSchema,
   /** 現行版との構造化差分（プレビュー表示用）。 */
   diff: PlanDiffSchema,
+  /** 提案のために新規生成した R2 object。却下・上書き時の後始末に使う。 */
+  generatedImageKeys: z.array(z.string()).default([]),
   createdAt: z.string(),
 });
 export type PendingPlanEdit = z.infer<typeof PendingPlanEditSchema>;

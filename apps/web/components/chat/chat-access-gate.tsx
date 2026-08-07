@@ -8,7 +8,7 @@ import { createChatAccess, RateLimitError, TurnstileError } from "@/lib/api";
 import { saveChatAccess } from "@/lib/chat-access-token";
 
 /**
- * 常駐チャットの接続トークンを取り直すゲート（#20）。
+ * 常駐チャットの接続許可 Cookie を取り直すゲート（#20）。
  *
  * 生成直後は `POST /plans` が同じ Turnstile 検証の中でトークンを返すため出番はない。
  * ここが出るのは「Home の作成履歴から入った」「URL を直接開いた」「トークンが期限切れ」
@@ -19,8 +19,8 @@ export function ChatAccessGate({
   onGranted,
 }: {
   planId: string;
-  /** トークン取得に成功したときに呼ばれる。 */
-  onGranted: (token: string) => void;
+  /** HttpOnly Cookie の発行に成功したときに呼ばれる。 */
+  onGranted: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -34,10 +34,9 @@ export function ChatAccessGate({
       try {
         const access = await createChatAccess(planId, turnstileToken);
         saveChatAccess(planId, {
-          token: access.chatAccessToken,
           expiresAt: access.expiresAt,
         });
-        onGranted(access.chatAccessToken);
+        onGranted();
       } catch (e) {
         if (e instanceof TurnstileError) {
           setError(e.message);

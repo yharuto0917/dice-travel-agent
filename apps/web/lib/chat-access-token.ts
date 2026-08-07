@@ -1,12 +1,11 @@
 /**
- * 常駐チャット（#20）の接続トークンをブラウザ側で保持するユーティリティ。
+ * 常駐チャット（#20）の接続許可期限をブラウザ側で保持するユーティリティ。
  *
- * 署名検証はサーバのみが行う。ここで扱うのは「どの planId のトークンをいま持っているか」
- * と「期限切れかどうか」だけで、期限判定はサーバへの無駄な接続を減らすための先読みに
- * 過ぎない（改竄しても Hono の認可ゲートで弾かれる）。
+ * 署名付き access token 本体は API origin の HttpOnly Cookie に置き、JavaScript や
+ * WebSocket URL からは触れない。ここで扱うのは「どの planId の接続許可が期限内か」
+ * という UI 用マーカーだけで、改竄しても Worker の認可ゲートで弾かれる。
  *
- * 保存先は `sessionStorage`。タブを閉じれば消えるため、共有端末でトークンが残らない。
- * Cookie に載せないのは、しおり以外の全リクエストに付いて回る必要がないため。
+ * 保存先は `sessionStorage`。タブを閉じれば消えるため、共有端末では再度 Turnstile を通す。
  */
 
 /** 保存キーの接頭辞。planId ごとに別のトークンを持つ。 */
@@ -20,7 +19,6 @@ const STORAGE_PREFIX = "tabidice.chatAccess.";
 const EXPIRY_SKEW_MS = 30 * 1000;
 
 export interface StoredChatAccess {
-  token: string;
   expiresAt: string;
 }
 
@@ -38,7 +36,7 @@ function safeSessionStorage(): Storage | null {
   }
 }
 
-/** 指定 planId のトークンを保存する。 */
+/** 指定 planId の接続許可期限を保存する。 */
 export function saveChatAccess(planId: string, access: StoredChatAccess): void {
   const storage = safeSessionStorage();
   if (!storage) return;
@@ -50,7 +48,7 @@ export function saveChatAccess(planId: string, access: StoredChatAccess): void {
 }
 
 /**
- * 指定 planId の有効なトークンを取り出す。
+ * 指定 planId の有効な接続許可マーカーを取り出す。
  * 未保存・壊れている・期限切れの場合は null を返し、期限切れなら保存も消す。
  */
 export function loadChatAccess(planId: string, now: Date = new Date()): StoredChatAccess | null {
@@ -74,7 +72,7 @@ export function loadChatAccess(planId: string, now: Date = new Date()): StoredCh
   }
 
   const value = parsed as Partial<StoredChatAccess>;
-  if (typeof value.token !== "string" || typeof value.expiresAt !== "string") {
+  if (typeof value.expiresAt !== "string") {
     clearChatAccess(planId);
     return null;
   }
@@ -85,10 +83,10 @@ export function loadChatAccess(planId: string, now: Date = new Date()): StoredCh
     return null;
   }
 
-  return { token: value.token, expiresAt: value.expiresAt };
+  return { expiresAt: value.expiresAt };
 }
 
-/** 指定 planId のトークンを破棄する。 */
+/** 指定 planId の接続許可マーカーを破棄する。 */
 export function clearChatAccess(planId: string): void {
   const storage = safeSessionStorage();
   if (!storage) return;

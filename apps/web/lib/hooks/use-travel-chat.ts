@@ -2,7 +2,6 @@
 
 import { useAgentChat } from "@cloudflare/ai-chat/react";
 import {
-  CHAT_ACCESS_QUERY_PARAM,
   ChatDataPartSchema,
   type ChatMessage,
   type RateLimitStatus,
@@ -25,8 +24,6 @@ const MAX_CONNECT_FAILURES = 3;
 
 export interface UseTravelChatOptions {
   planId: string;
-  /** 接続許可トークン。無い場合は接続しない（呼び出し側が gate を出す）。 */
-  token: string;
   /** 認可に失敗した（トークンが無効・期限切れ）ときに通知する。 */
   onUnauthorized?: () => void;
   /**
@@ -76,7 +73,6 @@ export interface UseTravelChatResult {
  */
 export function useTravelChat({
   planId,
-  token,
   onUnauthorized,
   onPlanMaybeChanged,
 }: UseTravelChatOptions): UseTravelChatResult {
@@ -94,8 +90,8 @@ export function useTravelChat({
     agent: TRAVEL_CHAT_AGENT_NAME,
     name: planId,
     host: AGENT_HOST,
-    // トークンはクエリで渡す。Hono の認可ゲートが planId・所有者と突き合わせる。
-    query: { [CHAT_ACCESS_QUERY_PARAM]: token },
+    // 接続許可は API origin の plan 専用 HttpOnly Cookie が WebSocket handshake に付く。
+    // URL へ token を載せないため、ログや履歴へ資格情報を残さない。
     onStateUpdate: (next) => setState(next),
   });
 
@@ -127,12 +123,19 @@ export function useTravelChat({
   }, [status]);
 
   const loadArchivePage = useCallback(
-    async (before?: string) => {
+    async (before?: string, beforeMessageId?: string) => {
       if (loadingArchiveRef.current) return;
       loadingArchiveRef.current = true;
       try {
-        const page = await getChatMessages(planId, { limit: ARCHIVE_PAGE_SIZE, before });
-        setArchive((prev) => [...page.messages, ...prev]);
+        const page = await getChatMessages(planId, {
+          limit: ARCHIVE_PAGE_SIZE,
+          before,
+          beforeMessageId,
+        });
+        setArchive((prev) => {
+          const known = new Set(prev.map((message) => message.id));
+          return [...page.messages.filter((message) => !known.has(message.id)), ...prev];
+        });
         setNextCursor(page.nextCursor);
         archiveLoadedRef.current = true;
       } catch {
@@ -184,11 +187,27 @@ export function useTravelChat({
 
   const loadOlder = useCallback(() => {
     if (!archiveLoadedRef.current) {
-      void loadArchivePage();
+      void loadArchivePage(undefined, messages[0]?.id);
       return;
     }
     if (nextCursor) void loadArchivePage(nextCursor);
-  }, [loadArchivePage, nextCursor]);
+  }, [loadArchivePage, messages, nextCursor]);
+
+  // DO の履歴同期が完了したら、最古の live message より前を初回ページとして先読みする。
+  // 会話が短くスクロール領域ができない場合でも、過去履歴を表示できる。
+  useEffect(() => {
+    // status は接続直後から ready になり得る。messages が空の時点で D1 の最新ページを読むと
+    // 後から同期された live 履歴と全件重複するため、最古 id が確定するまで待つ。
+    if (
+      status !== "ready" ||
+      messages.length === 0 ||
+      archiveLoadedRef.current ||
+      loadingArchiveRef.current
+    ) {
+      return;
+    }
+    void loadArchivePage(undefined, messages[0]?.id);
+  }, [loadArchivePage, messages, status]);
 
   /**
    * 修正を承認する。

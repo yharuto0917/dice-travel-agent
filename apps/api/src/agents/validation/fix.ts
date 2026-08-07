@@ -111,6 +111,7 @@ export async function fixPlan(
   plan: TravelPlanDraft,
   errors: string[],
   attempts: number = FIX_MAX_ATTEMPTS,
+  abortSignal?: AbortSignal,
 ): Promise<TravelPlan | null> {
   let current: TravelPlanDraft = plan;
   let currentErrors = errors;
@@ -119,6 +120,7 @@ export async function fixPlan(
   const model = createLlm(env, SUPERVISOR_MODEL_ID);
 
   for (let i = 0; i < attempts; i++) {
+    abortSignal?.throwIfAborted();
     // 退行(同語反復ループ)を抑止するため temperature 0 / 出力上限 / 思考最小で決定的に修復する。
     // generateObject が退行や JSON 破綻で throw しても finalize を固めないよう、各試行を
     // try/catch で囲み、失敗時は次試行へ（最終的に null を返し呼び出し側が best-effort 保存）。
@@ -127,6 +129,7 @@ export async function fixPlan(
       const result = await generateObject({
         // 修復も品質重視で Supervisor モデル。退行防止のため思考は low 固定。
         model,
+        abortSignal,
         schema: PlanRepairSchema,
         temperature: 0,
         maxOutputTokens: REPAIR_MAX_OUTPUT_TOKENS,
@@ -142,6 +145,7 @@ export async function fixPlan(
       });
       object = result.object;
     } catch {
+      abortSignal?.throwIfAborted();
       // この試行は失敗。これまでの最善（current）を呼び出し側へ委ねる。
       return null;
     }

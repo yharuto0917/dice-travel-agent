@@ -12,16 +12,37 @@ import {
 } from "@repo/shared";
 import { and, desc, eq, lt, or } from "drizzle-orm";
 import { type Context, Hono } from "hono";
+import { setCookie } from "hono/cookie";
+import { PlanRevisionConflictError, persistPlanRevision } from "../agents/chat/plan-persistence";
 import { diffPlans } from "../agents/validation/diff";
 import { getDb } from "../db/client";
 import { chatMessages, type PlanRow, plans, planVersions } from "../db/schema";
 import type { AppEnv } from "../env";
-import { signChatAccessToken } from "../lib/chat-access-token";
+import {
+  chatAccessCookieName,
+  chatAccessCookiePath,
+  signChatAccessToken,
+} from "../lib/chat-access-token";
 import { consumeRateLimit } from "../lib/rate-limit";
 import { rateLimited } from "../lib/rate-limit-response";
 import { TURNSTILE_TOKEN_HEADER, verifyTurnstile } from "../lib/turnstile";
 
 const plansRoute = new Hono<AppEnv>();
+
+/** chat access token を JS から読めない、計画専用パスの Cookie として発行する。 */
+function setChatAccessCookie(
+  c: Context<AppEnv>,
+  planId: string,
+  access: { token: string; expiresAt: string },
+): void {
+  setCookie(c, chatAccessCookieName(planId), access.token, {
+    httpOnly: true,
+    secure: true,
+    sameSite: "Lax",
+    path: chatAccessCookiePath(planId),
+    expires: new Date(access.expiresAt),
+  });
+}
 
 /** 自分（clientId）が所有する計画行を取得する。無ければ null。 */
 async function loadOwnedPlan(
@@ -95,10 +116,10 @@ plansRoute.post("/", zValidator("json", CreatePlanRequestSchema), async (c) => {
   // このリクエストは既に Turnstile を通っているため、しおり到達時に同じ人へ再チャレンジを
   // 要求しないよう、ここで常駐チャット（#20）の接続トークンも発行する。
   const access = await signChatAccessToken(c.env.CHAT_ACCESS_SECRET, { planId, clientId });
+  setChatAccessCookie(c, planId, access);
 
   return c.json({
     id: planId,
-    chatAccessToken: access.token,
     expiresAt: access.expiresAt,
   } satisfies CreatePlanResponse);
 });
@@ -126,8 +147,8 @@ plansRoute.post("/:id/chat-access", async (c) => {
   if (!turnstile.success) return turnstileFailed(c, turnstile.errorCodes);
 
   const access = await signChatAccessToken(c.env.CHAT_ACCESS_SECRET, { planId: id, clientId });
+  setChatAccessCookie(c, id, access);
   return c.json({
-    chatAccessToken: access.token,
     expiresAt: access.expiresAt,
   } satisfies CreateChatAccessResponse);
 });
@@ -229,22 +250,18 @@ plansRoute.post("/:id/restore", zValidator("json", RestorePlanRequestSchema), as
   if (!target.found) return c.json({ error: "version not found" }, 404);
   if (!target.plan) return c.json({ error: "version has no plan content" }, 409);
 
-  // 現行 plan を退避してから復元する（履歴を失わない）。
-  if (row.plan) {
-    await db.insert(planVersions).values({
-      id: crypto.randomUUID(),
-      planId: id,
-      version: row.version,
-      plan: row.plan,
+  try {
+    await persistPlanRevision(c.env, {
+      plan: target.plan,
+      row,
       label: `restore元(v${row.version})`,
     });
+  } catch (error) {
+    if (error instanceof PlanRevisionConflictError) {
+      return c.json({ error: "plan was updated; reload and retry" }, 409);
+    }
+    throw error;
   }
-
-  const nextVersion = row.version + 1;
-  await db
-    .update(plans)
-    .set({ plan: target.plan, version: nextVersion, updatedAt: new Date().toISOString() })
-    .where(eq(plans.id, id));
 
   const updated = await loadOwnedPlan(db, id, c.get("clientId"));
   return c.json(updated ? toGetPlanResponse(updated) : { error: "not found" });
@@ -262,17 +279,15 @@ function toChatMessage(row: typeof chatMessages.$inferSelect): ChatMessage {
 }
 
 /**
- * 履歴ページングの cursor。`createdAt` は秒精度なので同時刻の行が並びうる。
- * `id` を第2キーに含めて全順序を作り、ページ境界での重複・欠落を防ぐ。
+ * 履歴ページングの cursor。新規保存はミリ秒かつ単調増加の createdAt を使う。
+ * id は旧データに同一秒の行がある場合にも全順序を作るための第2キー。
  */
 export type ChatCursor = { createdAt: string; id: string };
 
 /**
  * cursor を URL に載せられる不透明な文字列へ変換する。
  *
- * 区切り文字での単純連結は使わない。D1 の `CURRENT_TIMESTAMP` は `"YYYY-MM-DD HH:MM:SS"` と
- * 空白を含むため、素朴な区切りでは日付部分だけを日時と誤読してページ境界がずれる。
- * JSON 配列にして曖昧さを消す。
+ * 将来 cursor に項目を足せるよう JSON オブジェクトのまま不透明化する。
  */
 export function encodeCursor(cursor: ChatCursor): string {
   return btoa(JSON.stringify([cursor.createdAt, cursor.id]));
@@ -306,8 +321,19 @@ plansRoute.get("/:id/chat", zValidator("query", ChatHistoryQuerySchema), async (
   const row = await loadOwnedPlan(db, id, c.get("clientId"));
   if (!row) return c.json({ error: "plan not found" }, 404);
 
-  const { limit, before } = c.req.valid("query");
-  const cursor = decodeCursor(before);
+  const { limit, before, beforeMessageId } = c.req.valid("query");
+  let cursor = decodeCursor(before);
+
+  // 初回は DO が現在保持している最古の live message より前から始める。
+  // D1 の最新ページを一度返して client 側で全件重複除外する形だと、可視行が増えないまま
+  // cursor だけ進み、上端検知が再発火せず過去へ到達できない。
+  if (!cursor && beforeMessageId) {
+    const [boundary] = await db
+      .select({ createdAt: chatMessages.createdAt, id: chatMessages.id })
+      .from(chatMessages)
+      .where(and(eq(chatMessages.planId, id), eq(chatMessages.id, beforeMessageId)));
+    if (boundary) cursor = boundary;
+  }
 
   // 次ページの有無を1クエリで判定するため limit+1 件取り、超過分は返さず cursor 生成に使う。
   const rows = await db
@@ -334,8 +360,7 @@ plansRoute.get("/:id/chat", zValidator("query", ChatHistoryQuerySchema), async (
   return c.json({
     // 取得は新しい順。表示は古い順なので反転して返す。
     messages: page.map(toChatMessage).reverse(),
-    nextCursor:
-      hasMore && oldest ? encodeCursor({ createdAt: oldest.createdAt, id: oldest.id }) : null,
+    nextCursor: hasMore && oldest ? encodeCursor(oldest) : null,
   } satisfies ChatHistoryResponse);
 });
 

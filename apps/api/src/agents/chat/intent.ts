@@ -84,10 +84,13 @@ export async function classifyIntent(
   env: Bindings,
   plan: TravelPlan,
   messages: ModelMessage[],
+  abortSignal?: AbortSignal,
 ): Promise<ChatClassification> {
   try {
+    abortSignal?.throwIfAborted();
     const { object } = await generateObject({
       model: createLlm(env, SUBAGENT_MODEL_ID),
+      abortSignal,
       schema: ClassificationSchema,
       temperature: 0,
       maxOutputTokens: INTENT_MAX_OUTPUT_TOKENS,
@@ -102,6 +105,7 @@ export async function classifyIntent(
     });
     return normalizeClassification(object, plan.days.length);
   } catch {
+    abortSignal?.throwIfAborted();
     return { intent: "question", dayNumbers: [] };
   }
 }

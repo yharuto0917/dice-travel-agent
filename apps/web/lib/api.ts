@@ -143,10 +143,10 @@ export async function createPlan(
 }
 
 /**
- * 常駐チャットの接続トークンを発行する（#20）。
+ * 常駐チャットの接続許可を HttpOnly Cookie として発行する（#20）。
  *
  * 生成フローを経ずにしおりへ入った場合（Home の作成履歴・URL 直開き）に使う。
- * 計画作成時（`createPlan`）は同じ Turnstile 検証の中でトークンが返るため不要。
+ * 計画作成時（`createPlan`）は同じ Turnstile 検証の中で Cookie が返るため不要。
  */
 export async function createChatAccess(
   planId: string,
@@ -174,11 +174,12 @@ export function getRateLimits(): Promise<RateLimitsResponse> {
  */
 export function getChatMessages(
   id: string,
-  options?: { limit?: number; before?: string },
+  options?: { limit?: number; before?: string; beforeMessageId?: string },
 ): Promise<ChatHistoryResponse> {
   const params = new URLSearchParams();
   if (options?.limit) params.set("limit", String(options.limit));
   if (options?.before) params.set("before", options.before);
+  if (options?.beforeMessageId) params.set("beforeMessageId", options.beforeMessageId);
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return apiJson<ChatHistoryResponse>(`/plans/${id}/chat${query}`);
 }

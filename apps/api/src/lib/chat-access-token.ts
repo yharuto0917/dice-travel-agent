@@ -3,11 +3,21 @@
  *
  * Chat Agent は `/agents/travel-chat-agent/{planId}` の WebSocket で公開されるため、
  * Hono の Cookie ミドルウェアを経由しない。所有者確認と Turnstile 検証を通した時にだけ
- * このトークンを発行し、接続時に Hono の認可ゲートで検証する。
- *
- * WebSocket の URL に Cookie の実値や secret を載せないよう、planId / clientId / 期限を
- * 含む payload を HMAC-SHA256 で署名した独立トークンにする。
+ * このトークンを HttpOnly Cookie として発行し、接続時に Worker の認可ゲートで検証する。
+ * URL にトークンを載せないため、アクセスログや Referer からの漏えいを防げる。
  */
+
+import { parse, parseSigned } from "hono/utils/cookie";
+import { CLIENT_ID_COOKIE } from "../middleware/client-id";
+
+/** 常駐チャット Agent のルーティング接頭辞。 */
+export const CHAT_AGENT_PREFIX = "/agents/travel-chat-agent/";
+
+/** 検証済みの失効時刻を Agent へだけ渡す内部ヘッダ。外部入力は認可ゲートで上書きする。 */
+export const CHAT_ACCESS_EXPIRES_HEADER = "x-tabidice-chat-access-exp";
+
+/** planId ごとに分離した HttpOnly Cookie の接頭辞。 */
+const CHAT_ACCESS_COOKIE_PREFIX = "tabidice_chat_";
 
 /** トークンの用途。他の署名値をこのゲートへ流用できないよう payload に固定で含める。 */
 const TOKEN_PURPOSE = "travel-chat";
@@ -22,6 +32,24 @@ export interface ChatAccessTokenPayload {
   clientId: string;
   /** 失効時刻（UNIX 秒）。 */
   exp: number;
+}
+
+/** 現在時刻が接続期限以上なら失効。境界時刻ちょうども利用不可にする。 */
+export function isChatAccessExpired(expiresAt: number, now: number = Date.now()): boolean {
+  return !Number.isFinite(expiresAt) || expiresAt <= now;
+}
+
+/** 実際に発行される planId は UUID。Cookie 名へ安全に埋め込める文字だけを許可する。 */
+export function chatAccessCookieName(planId: string): string {
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(planId)) {
+    throw new Error("invalid planId for chat access cookie");
+  }
+  return `${CHAT_ACCESS_COOKIE_PREFIX}${planId}`;
+}
+
+/** Cookie を Chat Agent の当該 planId パスだけへ送る。 */
+export function chatAccessCookiePath(planId: string): string {
+  return `${CHAT_AGENT_PREFIX}${planId}`;
 }
 
 /** 検証結果。失敗理由は UI へは出さずログ・ステータス選択にだけ使う。 */
@@ -114,7 +142,7 @@ export async function verifyChatAccessToken(
   const ok = await crypto.subtle.verify(
     "HMAC",
     key,
-    signatureBytes as unknown as ArrayBuffer,
+    Uint8Array.from(signatureBytes),
     new TextEncoder().encode(body),
   );
   if (!ok) return { valid: false, reason: "bad_signature" };
@@ -149,4 +177,32 @@ export async function verifyChatAccessToken(
       exp: payload.exp,
     },
   };
+}
+
+/**
+ * WebSocket upgrade リクエストの HttpOnly access token と、現在の署名付き `cid` Cookie を
+ * 同時に検証する。access token の clientId だけを DB 所有者と比べるのではなく、いま
+ * 接続しているブラウザの署名付き Cookie とも結合することで、漏れた値の別端末利用を防ぐ。
+ */
+export async function verifyChatAccessRequest(
+  request: Request,
+  secrets: { chatAccess: string; cookie: string },
+  planId: string,
+  nowSec: number = Math.floor(Date.now() / 1000),
+): Promise<VerifyChatAccessResult> {
+  if (!secrets.cookie) throw new Error("COOKIE_SECRET is not configured");
+
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const cookieName = chatAccessCookieName(planId);
+  const token = parse(cookieHeader, cookieName)[cookieName];
+  const result = await verifyChatAccessToken(secrets.chatAccess, token, nowSec);
+  if (!result.valid) return result;
+  if (result.payload.planId !== planId) return { valid: false, reason: "malformed" };
+
+  const signed = await parseSigned(cookieHeader, secrets.cookie, CLIENT_ID_COOKIE);
+  const currentClientId = signed[CLIENT_ID_COOKIE];
+  if (typeof currentClientId !== "string" || currentClientId !== result.payload.clientId) {
+    return { valid: false, reason: "bad_signature" };
+  }
+  return result;
 }

@@ -99,7 +99,7 @@ function clampText(s: string | undefined, max: number): string | undefined {
  * 巨大な run-on 文字列がそのまま title/description に残るのを防ぐ防御層。
  */
 function sanitizeDay(day: PlanDay): PlanDay {
-  return {
+  const sanitized = {
     ...day,
     title: clampText(day.title, MAX_TITLE_LEN),
     items: day.items.map((item) => ({
@@ -108,6 +108,9 @@ function sanitizeDay(day: PlanDay): PlanDay {
       description: clampText(item.description, MAX_DESC_LEN),
     })),
   };
+  // 保存スキーマでは後方互換のため description が optional。生成経路ではサニタイズ後にも
+  // 生成用スキーマを再検証し、空白→undefined へ落ちた item を保存させない。
+  return PlanDayGenSchema.parse(sanitized) as PlanDay;
 }
 
 /** 画像を生成する対象の種別。観光名所（観光スポット `spot`）のみに限定する（#18）。 */

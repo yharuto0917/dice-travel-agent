@@ -6,6 +6,7 @@ import {
   carryOverImages,
   cleanSummary,
   createReasoningReporter,
+  exceedsEditDayLimit,
   isDegenerateDay,
   normalizeStartTime,
   resolveTargetDays,
@@ -46,6 +47,11 @@ describe("chat/edit resolveTargetDays", () => {
     expect(resolveTargetDays(plan, [1, 3])).toEqual([1]);
   });
 
+  it("4日以上の一括編集は生成コスト上限を超える", () => {
+    expect(exceedsEditDayLimit([1, 2, 3])).toBe(false);
+    expect(exceedsEditDayLimit([1, 2, 3, 4])).toBe(true);
+  });
+
   it("対象が特定できない（空）ときは空を返す", () => {
     // 全日を作り直すと出力上限で JSON が破綻し、指示と無関係な日まで変わってしまう。
     // 対象不明なら提案を作らず、呼び出し側で日にちの指定を促す。
@@ -68,6 +74,7 @@ describe("chat/edit buildPendingEdit", () => {
     expect(edit.summary).toBe("2日目を温泉中心に変更");
     expect(edit.proposedPlan.days[1]?.items[0]?.title).toBe("箱根温泉");
     expect(edit.createdAt).toBe("1970-01-01T00:00:00.000Z");
+    expect(edit.generatedImageKeys).toEqual([]);
 
     const day2 = edit.diff.days.find((d) => d.dayNumber === 2);
     expect(day2?.change).toBe("changed");
@@ -156,16 +163,16 @@ describe("chat/edit sanitizeGeneratedDay", () => {
     expect(day.items[0]?.description?.length).toBeLessThanOrEqual(800);
   });
 
-  it("空白だけの description は未設定として落とす", () => {
-    const day = sanitizeGeneratedDay(
-      {
-        dayNumber: 1,
-        items: [{ id: "i1", type: "spot", title: "首里城", description: "  \n " }],
-      },
-      1,
-    );
-
-    expect(day.items[0]?.description).toBeUndefined();
+  it("空白だけの description はサニタイズ後の生成不変条件で拒否する", () => {
+    expect(() =>
+      sanitizeGeneratedDay(
+        {
+          dayNumber: 1,
+          items: [{ id: "i1", type: "spot", title: "首里城", description: "  \n " }],
+        },
+        1,
+      ),
+    ).toThrow();
   });
 
   it("モデルが書いた image は採用しない（URL は転記できないため）", () => {
@@ -286,12 +293,131 @@ describe("chat/edit carryOverImages", () => {
     expect(carryOverImages(previous, generated).items[0]?.image?.url).toBe("https://x/shuri.png");
   });
 
+  it("同じタイトルでも場所が変われば別スポットの画像を引き継がない", () => {
+    const previous: PlanDay = {
+      dayNumber: 1,
+      items: [
+        {
+          id: "a",
+          type: "spot",
+          title: "美術館見学",
+          location: { name: "A美術館" },
+          image: withImage("https://x/a-museum.png"),
+        },
+      ],
+    };
+    const generated: PlanDay = {
+      dayNumber: 1,
+      items: [{ id: "b", type: "spot", title: "美術館見学", location: { name: "B美術館" } }],
+    };
+
+    expect(carryOverImages(previous, generated).items[0]?.image).toBeUndefined();
+  });
+
+  it("同じ場所の予定が修正前に複数あっても、どちらの画像も失わない", () => {
+    // 同じ場所で2つ予定を組む（散策と夕日鑑賞など）のは普通にあり得る。
+    // 鍵が重複しただけで引き継ぎを諦めると、この日の写真が丸ごと消える。
+    const previous: PlanDay = {
+      dayNumber: 1,
+      items: [
+        {
+          id: "a",
+          type: "spot",
+          title: "鳥取砂丘の散策",
+          location: { name: "鳥取砂丘" },
+          image: withImage("https://x/dune-1.png"),
+        },
+        {
+          id: "b",
+          type: "spot",
+          title: "鳥取砂丘で夕日鑑賞",
+          location: { name: "鳥取砂丘" },
+          image: withImage("https://x/dune-2.png"),
+        },
+      ],
+    };
+    const generated: PlanDay = {
+      dayNumber: 1,
+      items: [
+        { id: "a2", type: "spot", title: "鳥取砂丘の散策", location: { name: "鳥取砂丘" } },
+        { id: "b2", type: "spot", title: "鳥取砂丘で夕日鑑賞", location: { name: "鳥取砂丘" } },
+      ],
+    };
+
+    const merged = carryOverImages(previous, generated);
+    expect(merged.items.map((item) => item.image?.url)).toEqual([
+      "https://x/dune-1.png",
+      "https://x/dune-2.png",
+    ]);
+  });
+
+  it("同じタイトルの予定が修正前に複数あっても引き継ぐ", () => {
+    const previous: PlanDay = {
+      dayNumber: 1,
+      items: [
+        { id: "a", type: "spot", title: "自由散策", image: withImage("https://x/free-1.png") },
+        { id: "b", type: "spot", title: "自由散策", image: withImage("https://x/free-2.png") },
+      ],
+    };
+    const generated: PlanDay = {
+      dayNumber: 1,
+      items: [
+        { id: "a2", type: "spot", title: "自由散策" },
+        { id: "b2", type: "spot", title: "自由散策" },
+      ],
+    };
+
+    const merged = carryOverImages(previous, generated);
+    expect(merged.items.map((item) => item.image?.url)).toEqual([
+      "https://x/free-1.png",
+      "https://x/free-2.png",
+    ]);
+  });
+
+  it("1枚の画像を複数の予定へ重複して貼らない", () => {
+    const previous: PlanDay = {
+      dayNumber: 1,
+      items: [
+        {
+          id: "a",
+          type: "spot",
+          title: "鳥取砂丘の散策",
+          location: { name: "鳥取砂丘" },
+          image: withImage("https://x/dune.png"),
+        },
+      ],
+    };
+    const generated: PlanDay = {
+      dayNumber: 1,
+      items: [
+        { id: "a2", type: "spot", title: "鳥取砂丘の散策", location: { name: "鳥取砂丘" } },
+        { id: "b2", type: "spot", title: "鳥取砂丘で夕日鑑賞", location: { name: "鳥取砂丘" } },
+      ],
+    };
+
+    const merged = carryOverImages(previous, generated);
+    expect(merged.items[0]?.image?.url).toBe("https://x/dune.png");
+    expect(merged.items[1]?.image).toBeUndefined();
+  });
+
   it("修正前の日が無ければそのまま返す（新規に作る日）", () => {
     const generated: PlanDay = {
       dayNumber: 2,
       items: [{ id: "a", type: "spot", title: "斎場御嶽" }],
     };
     expect(carryOverImages(undefined, generated)).toBe(generated);
+  });
+
+  it("画像を持つ予定が修正前に1件も無ければそのまま返す", () => {
+    const previous: PlanDay = {
+      dayNumber: 1,
+      items: [{ id: "a", type: "spot", title: "斎場御嶽" }],
+    };
+    const generated: PlanDay = {
+      dayNumber: 1,
+      items: [{ id: "a2", type: "spot", title: "斎場御嶽" }],
+    };
+    expect(carryOverImages(previous, generated)).toBe(generated);
   });
 });
 

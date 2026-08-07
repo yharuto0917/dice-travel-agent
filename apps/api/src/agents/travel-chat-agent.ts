@@ -1,12 +1,13 @@
 import { AIChatAgent } from "@cloudflare/ai-chat";
 import {
   type ChatDataPart,
+  type PendingPlanEdit,
   SendChatMessageRequestSchema,
   type TravelChatState,
   TravelChatStateSchema,
   type TravelPlan,
 } from "@repo/shared";
-import { type Connection, callable } from "agents";
+import { type Connection, type ConnectionContext, callable, getCurrentAgent } from "agents";
 import type { ChatResponseResult } from "agents/chat";
 import {
   convertToModelMessages,
@@ -20,16 +21,18 @@ import {
 } from "ai";
 import { eq } from "drizzle-orm";
 import { getDb } from "../db/client";
-import { chatMessages, type PlanRow, plans } from "../db/schema";
+import { type PlanRow, plans } from "../db/schema";
 import type { Bindings } from "../env";
+import { CHAT_ACCESS_EXPIRES_HEADER, isChatAccessExpired } from "../lib/chat-access-token";
 import { consumeRateLimit } from "../lib/rate-limit";
 import { streamChatAnswer } from "./chat/answer";
 import { createChatToolContext } from "./chat/context";
 import { createPlanEdit } from "./chat/edit";
 import { classifyIntent } from "./chat/intent";
-import { persistPlanRevision } from "./chat/plan-persistence";
+import { PlanRevisionConflictError, persistPlanRevision } from "./chat/plan-persistence";
 import { OFF_TOPIC_REPLY } from "./chat/prompts";
 import type { ToolContext } from "./tools/context";
+import { deleteGeneratedImageKeys } from "./tools/generate-image";
 
 /**
  * DO SQLite に保持する会話の上限。これより古い履歴は D1 `chat_messages` の
@@ -40,6 +43,15 @@ const MAX_PERSISTED_MESSAGES = 200;
 /** LLM へ渡す会話の直近件数。永続件数とは別に、文脈コストを抑えるため更に絞る。 */
 const MODEL_CONTEXT_MESSAGES = 20;
 
+/** access token 失効・認可不備で閉じるアプリケーション定義 WebSocket code。 */
+const CHAT_ACCESS_CLOSE_CODE = 4001;
+
+/** Hibernation をまたいで保持する接続単位の認可状態。 */
+interface ChatConnectionState {
+  /** UNIX ミリ秒。 */
+  accessExpiresAt: number;
+}
+
 /** 対象日を特定できなかった修正指示への返答。 */
 const NO_TARGET_REPLY =
   "どの日を変更するか教えていただけますか。「2日目を温泉中心に変えて」のように、日にちを添えてお伝えください。";
@@ -47,6 +59,10 @@ const NO_TARGET_REPLY =
 /** 修正案の生成・検証に失敗したときの返答。 */
 const EDIT_FAILED_REPLY =
   "うまく修正案を作れませんでした。変更したい内容をもう少し具体的に指定していただけますか。";
+
+/** 1回の編集日数上限を超えたときの返答。 */
+const TOO_MANY_TARGETS_REPLY =
+  "一度に変更できるのは3日分までです。対象を3日以内に分けてお伝えください。";
 
 /** 計画がまだ完成していないときの返答。 */
 const PLAN_NOT_READY_REPLY =
@@ -93,6 +109,54 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
   }
 
   /**
+   * 認可ゲートが検証した失効時刻を接続 state に保存し、永続 schedule で期限時に閉じる。
+   * connection.state と schedule はどちらも DO の Hibernation をまたいで残る。
+   */
+  async onConnect(connection: Connection<ChatConnectionState>, ctx: ConnectionContext) {
+    const expSec = Number(ctx.request.headers.get(CHAT_ACCESS_EXPIRES_HEADER));
+    const expiresAt = expSec * 1000;
+    if (isChatAccessExpired(expiresAt)) {
+      connection.close(CHAT_ACCESS_CLOSE_CODE, "Chat access expired");
+      return;
+    }
+
+    connection.setState({ accessExpiresAt: expiresAt });
+    try {
+      await this.schedule(
+        new Date(expiresAt),
+        "expireChatConnection",
+        { connectionId: connection.id, expiresAt },
+        { idempotent: true },
+      );
+    } catch (error) {
+      connection.close(CHAT_ACCESS_CLOSE_CODE, "Chat access scheduling failed");
+      throw error;
+    }
+  }
+
+  /** schedule された期限で、同じ認可期限を持つ接続だけを閉じる。 */
+  async expireChatConnection(payload: { connectionId: string; expiresAt: number }): Promise<void> {
+    const connection = this.getConnection<ChatConnectionState>(payload.connectionId);
+    if (!connection || connection.state?.accessExpiresAt !== payload.expiresAt) return;
+
+    // Date 指定 schedule は期限時刻以降に実行される。callback 内で再登録すると、実行中の
+    // idempotent schedule 自身へ吸収される恐れがあるため、ここでは必ず一度で閉じる。
+    connection.close(CHAT_ACCESS_CLOSE_CODE, "Chat access expired");
+  }
+
+  /** message / callable の入口でも期限を確認し、schedule 発火との短い競合窓を閉じる。 */
+  private assertChatAccessActive(): void {
+    const { connection } = getCurrentAgent<TravelChatAgent>();
+    // onChatResponse などサーバ起点のライフサイクルには connection が無い。
+    if (!connection) return;
+    const expiresAt = (connection.state as ChatConnectionState | null)?.accessExpiresAt;
+    if (typeof expiresAt === "number" && !isChatAccessExpired(expiresAt)) return;
+
+    connection.close(CHAT_ACCESS_CLOSE_CODE, "Chat access expired");
+    throw new Error("chat access expired");
+  }
+
+  /**
    * 計画行を D1 から読む。
    *
    * 毎ターン読み直す（キャッシュしない）。チャットの修正承認・バージョン復元で
@@ -132,11 +196,30 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
     content: string,
   ): Promise<void> {
     if (!content.trim()) return;
-    const db = getDb(this.env);
-    await db
-      .insert(chatMessages)
-      .values({ id, planId: this.planId, role, content })
-      .onConflictDoNothing();
+    const now = new Date().toISOString();
+    // D1 の既定 CURRENT_TIMESTAMP（秒精度）は使わない。同じ plan の直前時刻以上なら
+    // 1ms進めることで、定型応答のようにuser/assistantが同一ミリ秒でも保存順を維持する。
+    // 既存の秒精度行も julianday で読めるため、migrationで履歴を直接backfillする必要がない。
+    await this.env.DB.prepare(
+      `INSERT INTO chat_messages (id, plan_id, role, content, created_at)
+       SELECT ?, ?, ?, ?,
+         CASE
+           WHEN COALESCE(MAX(julianday(created_at)), 0) >= julianday(?)
+             THEN strftime('%Y-%m-%dT%H:%M:%fZ', MAX(julianday(created_at)) + 1.0 / 86400000)
+           ELSE ?
+         END
+       FROM chat_messages
+       WHERE plan_id = ?
+       ON CONFLICT(id) DO NOTHING`,
+    )
+      .bind(id, this.planId, role, content, now, now, this.planId)
+      .run();
+  }
+
+  /** 却下・上書きする提案のためだけに生成した R2 object を削除する。 */
+  private async deletePendingEditImages(pending: PendingPlanEdit | null): Promise<void> {
+    if (!pending) return;
+    await deleteGeneratedImageKeys(this.env.BUCKET, pending.generatedImageKeys ?? []);
   }
 
   /** 単発のテキスト応答をストリームへ書き出す（LLM を経由しない定型返答用）。 */
@@ -156,6 +239,7 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
     onFinish: StreamTextOnFinishCallback<ToolSet>,
     options?: { abortSignal?: AbortSignal },
   ): Promise<Response | undefined> {
+    this.assertChatAccessActive();
     const abortSignal = options?.abortSignal;
 
     const row = await this.loadPlanRow();
@@ -195,7 +279,7 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
       emptyMessages: "remove",
     });
 
-    const classification = await classifyIntent(this.env, plan, modelMessages);
+    const classification = await classifyIntent(this.env, plan, modelMessages, abortSignal);
 
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
@@ -207,10 +291,10 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
         }
 
         // 質問応答・修正案の双方が検索ツールを使うので、ターンの入口で1つ作って共有する。
-        const ctx = createChatToolContext(this.env, row, plan);
+        const ctx = createChatToolContext(this.env, row, plan, abortSignal);
 
         if (classification.intent === "edit") {
-          await this.runEdit(writer, ctx, plan, content, classification.dayNumbers);
+          await this.runEdit(writer, ctx, plan, content, classification.dayNumbers, abortSignal);
           return;
         }
 
@@ -238,6 +322,7 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
     plan: TravelPlan,
     instruction: string,
     dayNumbers: number[],
+    abortSignal?: AbortSignal,
   ): Promise<void> {
     if (dayNumbers.length === 0) {
       this.writeText(writer, NO_TARGET_REPLY);
@@ -253,6 +338,7 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
       plan,
       instruction,
       dayNumbers,
+      abortSignal,
       // 下調べのツール実行は待ち時間が長いので、何を調べているかを逐次表示する。
       onActivity: (label) => this.writeData(writer, { type: "data-activity", data: { label } }),
       // 修正案づくりはメッセージを組み立てずに進むため、思考の載せ先が無い。
@@ -260,12 +346,26 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
       onReasoning: (text) => this.writeData(writer, { type: "data-reasoning", data: { text } }),
     });
     if (result.status !== "ok") {
-      this.writeText(writer, result.reason === "no_target" ? NO_TARGET_REPLY : EDIT_FAILED_REPLY);
+      const reply =
+        result.reason === "no_target"
+          ? NO_TARGET_REPLY
+          : result.reason === "too_many_targets"
+            ? TOO_MANY_TARGETS_REPLY
+            : EDIT_FAILED_REPLY;
+      this.writeText(writer, reply);
       return;
     }
 
     // 提案は state 経由で全接続へ配信する（しおり側の差分プレビューも同じ state を見る）。
-    this.setState({ ...this.state, pendingEdit: result.edit });
+    const nextState = TravelChatStateSchema.parse({ ...this.state, pendingEdit: result.edit });
+    try {
+      await this.deletePendingEditImages(this.state.pendingEdit);
+      this.setState(nextState);
+    } catch (error) {
+      // state に載らなかった新提案の画像も孤立させない。旧提案は state に残る。
+      await this.deletePendingEditImages(result.edit);
+      throw error;
+    }
     this.writeData(writer, { type: "data-proposal", data: { editId: result.edit.id } });
     this.writeText(
       writer,
@@ -302,6 +402,7 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
    */
   @callable()
   async applyPlanEdit(id: string): Promise<void> {
+    this.assertChatAccessActive();
     const pending = this.state.pendingEdit;
     // 二重クリックや古いタブからの承認で、別の提案が適用されないよう id を突き合わせる。
     if (!pending || pending.id !== id) return;
@@ -309,12 +410,23 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
     const row = await this.loadPlanRow();
     if (!row) return;
 
-    const version = await persistPlanRevision(this.env, {
-      plan: pending.proposedPlan,
-      row,
-      status: "completed",
-      label: `チャット修正前(v${row.version})`,
-    });
+    let version: number;
+    try {
+      version = await persistPlanRevision(this.env, {
+        plan: pending.proposedPlan,
+        row,
+        status: "completed",
+        label: `チャット修正前(v${row.version})`,
+      });
+    } catch (error) {
+      if (error instanceof PlanRevisionConflictError && this.state.pendingEdit?.id === id) {
+        // 別タブや restore が先に版を進めた提案は、再クリックで新しい計画を古い案へ
+        // 上書きできないよう破棄する。未採用画像も同時に後始末する。
+        await this.deletePendingEditImages(pending);
+        this.setState({ ...this.state, pendingEdit: null });
+      }
+      throw error;
+    }
 
     this.setState({ ...this.state, pendingEdit: null, appliedVersion: version });
   }
@@ -322,8 +434,10 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
   /** 承認待ちの修正を破棄する（計画は変更しない）。 */
   @callable()
   async rejectPlanEdit(id: string): Promise<void> {
+    this.assertChatAccessActive();
     const pending = this.state.pendingEdit;
     if (!pending || pending.id !== id) return;
+    await this.deletePendingEditImages(pending);
     this.setState({ ...this.state, pendingEdit: null });
   }
 }

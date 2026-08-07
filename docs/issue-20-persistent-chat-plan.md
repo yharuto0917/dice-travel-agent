@@ -45,17 +45,17 @@ Issue #20（M5）は「しおり画面に常駐する Gemini チャットで、�
 [新規計画]
   POST /plans
     Turnstile 検証 → plan 作成
-    → planId に限定した chatAccessToken も返す
-    → sessionStorage に保存
+    → planId に限定した chat access Cookie を設定
+    → sessionStorage にはUI用の有効期限だけ保存
 
 [Home の過去計画 / URL直開き]
   TurnstileWidget
     → POST /plans/:id/chat-access
        所有者確認 + Turnstile 検証
-       → planId / clientId / exp を署名した chatAccessToken
+       → planId / clientId / exp を署名した HttpOnly Cookie
 
 [web /itinerary]
-  useAgent(travel-chat-agent, planId, query={token})
+  useAgent(travel-chat-agent, planId)
     └─ useAgentChat({ agent, resume: true })
          ├─ assistant応答・Tools結果をストリーム受信
          ├─ Agent state.pendingEdit を差分プレビューへ表示
@@ -63,7 +63,7 @@ Issue #20（M5）は「しおり画面に常駐する Gemini チャットで、�
                               ↓
 [Hono Agent gate]
   /agents/travel-chat-agent/:planId
-    → chatAccessToken の署名・期限・planId・clientIdを検証
+    → chat access Cookie の署名・期限・planId・clientId・署名付きcid Cookieを検証
     → TravelChatAgent DO へ転送
                               ↓
 [TravelChatAgent (AIChatAgent / planId ごとの DO)]
@@ -147,10 +147,10 @@ export const ChatDataPartSchema = z.discriminatedUnion("type", [
 
 追加 DTO:
 
-- `CreatePlanResponseSchema`: `id` と生成時に発行する `chatAccessToken`
+- `CreatePlanResponseSchema`: `id` と生成時に発行する接続許可の `expiresAt`
 - `CreateChatAccessRequestSchema`: Turnstile token は既存どおり header、body は不要
-- `CreateChatAccessResponseSchema`: `chatAccessToken`, `expiresAt`
-- `ChatHistoryQuerySchema`: `limit`（既定20、最大50）と `before` cursor
+- `CreateChatAccessResponseSchema`: `expiresAt`（token本体は HttpOnly Cookie）
+- `ChatHistoryQuerySchema`: `limit`（既定20、最大50）、`before` cursor、`beforeMessageId`
 - `ChatHistoryResponseSchema`: `messages`, `nextCursor`
 
 ### 3. Agent state のクライアント書き換え禁止
@@ -178,11 +178,11 @@ validateStateChange(next: State, source: Connection | "server"): void {
 - `clientId`
 - `exp`
 
-token は短期（目安2時間）・planId限定とし、URLへ生の Cookie 値や secret は載せない。
+token は短期（目安2時間）・planId限定の HttpOnly Cookie とし、URLやJavaScriptから参照できないようにする。Honoの認可ゲートでは、tokenの `clientId` と署名付き `cid` Cookieを照合する。接続後も期限時刻にWebSocketを閉じ、再認証を要求する。
 
 #### 新規計画からの遷移
 
-`POST /plans` は既存どおり Turnstile → planレートリミット → plan作成の順を維持し、同じ検証済みリクエスト内で `chatAccessToken` も発行する。web は planId 単位で token を `sessionStorage` に保存する。生成完了後の `/generating` → `/itinerary` では追加の Turnstile を要求しない。
+`POST /plans` は既存どおり Turnstile → planレートリミット → plan作成の順を維持し、同じ検証済みリクエスト内で chat access Cookie も発行する。web は planId 単位で有効期限だけを `sessionStorage` に保存する。生成完了後の `/generating` → `/itinerary` では追加の Turnstile を要求しない。
 
 #### Home の過去計画・URL直開き
 
@@ -190,13 +190,13 @@ token は短期（目安2時間）・planId限定とし、URLへ生の Cookie �
 
 1. 署名付き `cid` Cookie から所有者を解決し、`loadOwnedPlan` で planId を確認
 2. `cf-turnstile-response` を `verifyTurnstile` で検証
-3. 成功時だけ `chatAccessToken` を発行
+3. 成功時だけ planId にpath制限した chat access Cookieを発行
 
-Home の履歴カードは直接 `Link` せず、client component の `HistoryPlanLink` を介して Turnstile を完了してから token を保存・遷移する。bookmarkなど token 無しの `/itinerary` 直開きでも同じ gate を表示する。
+Home の履歴カードは直接 `Link` せず、client component の `HistoryPlanLink` を介して Turnstile を完了してから有効期限を保存・遷移する。bookmarkなど有効な接続許可が無い `/itinerary` 直開きでも同じ gate を表示する。
 
 #### Agent 接続
 
-`useAgent` は token を query parameter として渡す。Hono の `/agents/travel-chat-agent/:planId` middleware は WebSocket upgrade / HTTP request の双方で token を検証し、payload の `planId` とURL、`clientId` と計画所有者が一致しなければ 401/403 で拒否する。
+`useAgent` は認証情報をquery parameterへ渡さず、ブラウザがpath制限付きCookieを自動送信する。Hono の `/agents/travel-chat-agent/:planId` middleware は WebSocket upgrade / HTTP request の双方でtokenと署名付き `cid` Cookieを検証し、payload の `planId` とURL、`clientId` と `cid`・計画所有者が一致しなければ 401/403 で拒否する。
 
 ### 5. 共有チャット応答ロジック（`apps/api/src/agents/chat/`）
 
@@ -291,13 +291,13 @@ Radix / vaul は追加せず、既存デザインに合わせて自前実装す�
 | `components/chat/chat-dock.tsx` | モバイルはボトムドロワー、PCは右下フローティングパネル、閉時はFAB |
 | `components/chat/travel-chat.tsx` | `useAgentChat` の `messages` / `status` / `sendMessage` を AI Elements へ接続 |
 | `components/chat/plan-edit-proposal.tsx` | `pendingEdit.summary` / `diff` と承認・取消ボタン |
-| `components/chat/history-plan-link.tsx` | Home履歴の Turnstile gate、token保存、itinerary遷移 |
-| `components/chat/chat-access-gate.tsx` | token無し・期限切れ・直URL時の Turnstile gate |
+| `components/chat/history-plan-link.tsx` | Home履歴の Turnstile gate、有効期限保存、itinerary遷移 |
+| `components/chat/chat-access-gate.tsx` | 接続許可無し・期限切れ・直URL時の Turnstile gate |
 | `components/ai-elements/prompt-input.tsx` | textarea、Enter送信、Shift+Enter改行、送信中disabled、残回数 |
 | `components/ai-elements/response.tsx` | 既存 Streamdown 設定を共通化 |
 | `components/ai-elements/conversation.tsx` | 下端付近にいる場合だけ新着へ自動スクロール。上端でD1 archiveの前ページを取得 |
-| `lib/hooks/use-travel-chat.ts` | token付き `useAgent` と `useAgentChat({ resume: true })`、`onData` のschema検証、RateLimitError相当への変換 |
-| `lib/chat-access-token.ts` | planId単位の sessionStorage 読み書きと期限確認（署名検証はserverのみ） |
+| `lib/hooks/use-travel-chat.ts` | Cookie認証の `useAgent` と `useAgentChat({ resume: true })`、`onData` のschema検証、RateLimitError相当への変換 |
+| `lib/chat-access-token.ts` | planId単位のUI用有効期限の sessionStorage 読み書き（token本体はHttpOnly Cookie） |
 
 `chat-dock.tsx` は `role="dialog"` / `aria-modal` に加え、次を実装する。
 
@@ -312,8 +312,8 @@ Radix / vaul は追加せず、既存デザインに合わせて自前実装す�
 
 `apps/web/app/itinerary/page.tsx`:
 
-- tokenの有無を先に解決し、無ければ `ChatAccessGate`
-- token取得後に `useAgent({ agent: "travel-chat-agent", name: planId, query: { token } })`
+- 接続許可の有効期限を先に解決し、無ければ `ChatAccessGate`
+- Cookie取得後に `useAgent({ agent: "travel-chat-agent", name: planId })`
 - 同じ接続を `useAgentChat` と承認 callable で共有
 - `state.pendingEdit` を差分プレビューへ渡す
 - `state.appliedVersion` の変更を検知したら `getPlan(planId)` を再取得
@@ -323,11 +323,11 @@ Radix / vaul は追加せず、既存デザインに合わせて自前実装す�
 `apps/web/app/page.tsx`:
 
 - 履歴カードの直接 `Link` を `HistoryPlanLink` へ置換
-- Turnstile成功 → `POST /plans/:id/chat-access` → token保存 → itinerary遷移
+- Turnstile成功 → `POST /plans/:id/chat-access` → Cookie発行・期限保存 → itinerary遷移
 
 `apps/web/app/conditions/page.tsx` / `lib/api.ts`:
 
-- `POST /plans` の `chatAccessToken` を planId 単位で保存
+- `POST /plans` の接続許可期限を planId 単位で保存（token本体はHttpOnly Cookie）
 - 生成直後のしおり遷移では追加 Turnstile を表示しない
 
 ### 10. ラベル・設定・README

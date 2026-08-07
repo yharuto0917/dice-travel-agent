@@ -1,6 +1,13 @@
 import type { TravelPlanDraft, TripConditions } from "@repo/shared";
 import { sql } from "drizzle-orm";
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 const timestamp = (name: string) => text(name).notNull().default(sql`(CURRENT_TIMESTAMP)`);
 
@@ -48,7 +55,10 @@ export const planVersions = sqliteTable(
     label: text("label"),
     createdAt: timestamp("created_at"),
   },
-  (t) => [index("plan_versions_plan_id_idx").on(t.planId)],
+  (t) => [
+    index("plan_versions_plan_id_idx").on(t.planId),
+    uniqueIndex("plan_versions_plan_id_version_unique").on(t.planId, t.version),
+  ],
 );
 
 /**

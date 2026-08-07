@@ -111,10 +111,9 @@ export default function ConditionsPage() {
     },
     onSuccess: (data) => {
       // このリクエストは Turnstile を通っているため、しおりの常駐チャット（#20）用の
-      // 接続トークンも一緒に受け取っている。ここで保存しておけば、生成完了後に
+      // 接続許可 Cookie も一緒に受け取っている。期限マーカーを保存しておけば、生成完了後に
       // しおりへ移ったときに同じ人へ再チャレンジを要求しない。
       saveChatAccess(data.id, {
-        token: data.chatAccessToken,
         expiresAt: data.expiresAt,
       });
       router.push(`/generating?planId=${data.id}`);

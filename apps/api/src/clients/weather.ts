@@ -8,8 +8,8 @@ import { ApiClientBase } from "./base";
  * エラーやサービス停止時には気象庁 (JMA) の天気予報 API にフォールバックします。
  */
 export class WeatherClient extends ApiClientBase {
-  constructor(config: { kv?: KVNamespace }) {
-    super(config.kv);
+  constructor(config: { kv?: KVNamespace; abortSignal?: AbortSignal }) {
+    super(config.kv, config.abortSignal);
   }
 
   /**

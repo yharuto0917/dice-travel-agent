@@ -16,13 +16,18 @@ import type { ToolContext } from "../tools/context";
  * completed な計画は必ずこの値を持ち、無い場合も県庁所在地の代表点へ落とせるため、
  * 会話のたびに外部APIを叩く必要がない。
  */
-export function createChatToolContext(env: Bindings, row: PlanRow, plan: TravelPlan): ToolContext {
+export function createChatToolContext(
+  env: Bindings,
+  row: PlanRow,
+  plan: TravelPlan,
+  abortSignal?: AbortSignal,
+): ToolContext {
   const destPoint: GeoPoint | null =
     plan.destination?.location ?? prefectureCentroid(row.destinationPrefCode);
 
   return {
     env,
-    clients: createClients(env),
+    clients: createClients(env, abortSignal),
     destPoint,
     conditions: plan.conditions ?? row.conditions ?? {},
     usage: createUsageCounter(),

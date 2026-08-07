@@ -1,8 +1,14 @@
 import type { TravelPlan, TravelPlanDraft } from "@repo/shared";
-import { eq } from "drizzle-orm";
-import { getDb } from "../../db/client";
-import { type PlanRow, plans, planVersions } from "../../db/schema";
+import type { PlanRow } from "../../db/schema";
 import type { Bindings } from "../../env";
+
+/** 読み出した version が既に更新され、CAS に失敗したことを表す。 */
+export class PlanRevisionConflictError extends Error {
+  constructor() {
+    super("plan revision conflict");
+    this.name = "PlanRevisionConflictError";
+  }
+}
 
 /**
  * 計画の版更新を1か所にまとめる（#16 / #20）。
@@ -37,30 +43,56 @@ export async function persistPlanRevision(
   input: PersistPlanRevisionInput,
 ): Promise<number> {
   const { plan, row, status, label } = input;
-  const db = getDb(env);
   const currentVersion = row.version ?? 1;
   const nextVersion = row.plan ? currentVersion + 1 : currentVersion;
+  const now = new Date().toISOString();
+  const nextStatus = status ?? row.status;
+  const nextTitle = plan.title ?? row.title ?? null;
+  const serializedPlan = JSON.stringify(plan);
 
   if (row.plan) {
-    await db.insert(planVersions).values({
-      id: crypto.randomUUID(),
-      planId: row.id,
-      version: currentVersion,
-      plan: row.plan,
-      ...(label ? { label } : {}),
-    });
+    const snapshotId = crypto.randomUUID();
+    // D1 batch は全ステートメントを1トランザクションで逐次実行する。
+    // snapshot は入力 row の JSON ではなく、その瞬間の plans 行から SELECT する。
+    // UPDATE 側も snapshotId の存在と currentVersion を条件にするため、CAS 敗者は
+    // snapshot も現行更新も 0 件となり、中途半端な履歴を残さない。
+    const [, updated] = await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO plan_versions (id, plan_id, version, plan, label, created_at)
+         SELECT ?, id, version, plan, ?, ?
+         FROM plans
+         WHERE id = ? AND version = ? AND plan IS NOT NULL`,
+      ).bind(snapshotId, label ?? null, now, row.id, currentVersion),
+      env.DB.prepare(
+        `UPDATE plans
+         SET plan = ?, status = ?, title = ?, version = ?, updated_at = ?
+         WHERE id = ? AND version = ?
+           AND EXISTS (SELECT 1 FROM plan_versions WHERE id = ?)`,
+      ).bind(
+        serializedPlan,
+        nextStatus,
+        nextTitle,
+        nextVersion,
+        now,
+        row.id,
+        currentVersion,
+        snapshotId,
+      ),
+    ]);
+    if (updated?.meta.changes !== 1) throw new PlanRevisionConflictError();
+    return nextVersion;
   }
 
-  await db
-    .update(plans)
-    .set({
-      plan,
-      ...(status ? { status } : {}),
-      title: plan.title ?? row.title,
-      version: nextVersion,
-      updatedAt: new Date().toISOString(),
-    })
-    .where(eq(plans.id, row.id));
+  // 初回確定も version と plan IS NULL の両方で CAS する。同じ version 1 を読んだ
+  // 別処理が先に完成 plan を保存していれば、後勝ちで消さず競合として返す。
+  const updated = await env.DB.prepare(
+    `UPDATE plans
+     SET plan = ?, status = ?, title = ?, version = ?, updated_at = ?
+     WHERE id = ? AND version = ? AND plan IS NULL`,
+  )
+    .bind(serializedPlan, nextStatus, nextTitle, nextVersion, now, row.id, currentVersion)
+    .run();
+  if (updated.meta.changes !== 1) throw new PlanRevisionConflictError();
 
   return nextVersion;
 }

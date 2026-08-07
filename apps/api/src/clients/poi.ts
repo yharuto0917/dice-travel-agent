@@ -11,8 +11,13 @@ export class PoiClient extends ApiClientBase {
   private googleApiKey?: string;
   private foursquareKey?: string;
 
-  constructor(config: { googleApiKey?: string; foursquareKey?: string; kv?: KVNamespace }) {
-    super(config.kv);
+  constructor(config: {
+    googleApiKey?: string;
+    foursquareKey?: string;
+    kv?: KVNamespace;
+    abortSignal?: AbortSignal;
+  }) {
+    super(config.kv, config.abortSignal);
     this.googleApiKey = config.googleApiKey;
     this.foursquareKey = config.foursquareKey;
   }

@@ -27,13 +27,16 @@ const IMAGE_MODEL_ID = "gemini-3.1-flash-image";
 export async function generateItemImage(
   env: Bindings,
   subject: string,
+  abortSignal?: AbortSignal,
 ): Promise<GeneratedImage | null> {
   if (!env.GEMINI_API_KEY) return null;
+  abortSignal?.throwIfAborted();
 
   // 主題（場所名など）を、写真向けの詳細な英語プロンプトへ拡張する。
   // 拡張自体が失敗した場合は握り潰さず、そのまま Error を呼び出し側へ伝播させる。
   const { text } = await generateText({
     model: createLlm(env, PROMPT_GENERATE_MODEL_ID),
+    abortSignal,
     system:
       "あなたは画像生成プロンプトの専門家です。旅行先の場所・風景から、写実的で高品質な1枚の写真を生成するための詳細な英語プロンプトのみを出力してください。",
     prompt: `ユーザーから${subject}に関する画像を生成する指示です。\n
@@ -72,8 +75,10 @@ export async function generateItemImage(
   }
 
   try {
+    abortSignal?.throwIfAborted();
     const result = await generateImage({
       model: createImageModel(env, IMAGE_MODEL_ID),
+      abortSignal,
       prompt: `Please generate image using below prompt.\n
                ATTENTION:\n
                YOU HAVE TO USE IMAGE AND TEXT SEARCH BEFORE GENERATE IMAGE TO KNOW WHAT YOU WILL GENETATE.\n
@@ -94,13 +99,28 @@ export async function generateItemImage(
     await env.BUCKET.put(key, image.uint8Array, {
       httpMetadata: { contentType: mimeType },
     });
+    if (abortSignal?.aborted) {
+      await env.BUCKET.delete(key);
+      abortSignal.throwIfAborted();
+    }
 
     // アセットは API ワーカーの /assets ルートが配信する。フロント（WEB_ORIGIN）ではなく
     // API 自身の公開オリジン（ASSET_BASE_URL）で URL を組み立てる。未設定時はローカル既定。
     const base = env.ASSET_BASE_URL || "http://localhost:8787";
-    return { url: `${base}/assets/${key}`, prompt: subject };
+    return { url: `${base}/assets/${key}`, r2Key: key, prompt: subject };
   } catch (error) {
+    abortSignal?.throwIfAborted();
     console.error("[generateItemImage] Error:", error);
     return null;
   }
+}
+
+/** 未採用の生成画像をまとめて削除する。R2 の複数 key delete は原子的でなくても冪等。 */
+export async function deleteGeneratedImageKeys(
+  bucket: { delete: (keys: string | string[]) => Promise<void> },
+  keys: string[],
+): Promise<void> {
+  const unique = [...new Set(keys.filter(Boolean))];
+  if (unique.length === 0) return;
+  await bucket.delete(unique);
 }

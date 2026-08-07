@@ -50,7 +50,6 @@ export function HistoryPlanLink({
       try {
         const access = await createChatAccess(planId, turnstileToken);
         saveChatAccess(planId, {
-          token: access.chatAccessToken,
           expiresAt: access.expiresAt,
         });
         go();

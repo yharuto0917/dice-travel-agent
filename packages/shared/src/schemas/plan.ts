@@ -98,6 +98,7 @@ export const PlanItemGenSchema = z.object({
   title: z.string(),
   description: z
     .string()
+    .trim()
     .min(1)
     .describe(
       "しおりに載せる日本語の詳細説明（1〜2文）。何をする予定か、その場所の見どころ・楽しみ方を具体的に書く。空文字やタイトルの繰り返しは不可。",

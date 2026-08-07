@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `plan_versions_plan_id_version_unique` ON `plan_versions` (`plan_id`,`version`);

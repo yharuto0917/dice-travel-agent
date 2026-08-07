@@ -1,4 +1,4 @@
-import { CHAT_ACCESS_QUERY_PARAM, type RateLimitsResponse } from "@repo/shared";
+import type { RateLimitsResponse } from "@repo/shared";
 import { routeAgentRequest } from "agents";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
@@ -6,7 +6,11 @@ import { cors } from "hono/cors";
 import { getDb } from "./db/client";
 import { plans } from "./db/schema";
 import type { AppEnv, Bindings } from "./env";
-import { verifyChatAccessToken } from "./lib/chat-access-token";
+import {
+  CHAT_ACCESS_EXPIRES_HEADER,
+  CHAT_AGENT_PREFIX,
+  verifyChatAccessRequest,
+} from "./lib/chat-access-token";
 import { peekRateLimit } from "./lib/rate-limit";
 import { clientId } from "./middleware/client-id";
 import plansRoute from "./routes/plans";
@@ -83,34 +87,34 @@ app.get("/rate-limits", async (c) => {
 
 export type AppType = typeof app;
 
-/** 常駐チャット Agent のルーティング接頭辞（`/agents/{kebab-class-name}/{planId}`）。 */
-const CHAT_AGENT_PREFIX = "/agents/travel-chat-agent/";
-
 /**
  * 常駐チャット Agent への接続を認可する（#20）。
  *
  * Chat Agent は WebSocket で公開されるため Cookie ミドルウェアを経由しない。
- * 発行済みの chat access token（Turnstile + 所有者確認を通した時だけ発行）を検証し、
- * URL の planId・計画の所有者と突き合わせる。
+ * 発行済みの HttpOnly chat access token（Turnstile + 所有者確認を通した時だけ発行）と、
+ * 現在の署名付き `cid` Cookie、URL の planId、計画の所有者を突き合わせる。
  *
  * - token が主張する planId と URL の planId が食い違えば拒否（他計画への流用を防ぐ）
- * - token の clientId が計画の所有者でなければ拒否（漏れた token の横展開を防ぐ）
+ * - token の clientId が現在の署名付き `cid` と違えば拒否（別端末での再利用を防ぐ）
+ * - token の clientId が計画の所有者でなければ拒否（他計画への横展開を防ぐ）
  *
- * 認可を通った場合だけ null を返し、呼び出し側が Agents SDK のルーティングへ進む。
+ * 認可を通った場合は検証済みの失効時刻を内部ヘッダへ載せた Request を返す。
  */
-async function authorizeChatAgent(request: Request, env: Bindings): Promise<Response | null> {
+async function authorizeChatAgent(request: Request, env: Bindings): Promise<Request | Response> {
   const url = new URL(request.url);
   const planId = decodeURIComponent(
     url.pathname.slice(CHAT_AGENT_PREFIX.length).split("/")[0] ?? "",
   );
-  if (!planId) return new Response("plan not found", { status: 404 });
+  if (!planId || !/^[A-Za-z0-9_-]{1,128}$/.test(planId)) {
+    return new Response("plan not found", { status: 404 });
+  }
 
-  const result = await verifyChatAccessToken(
-    env.CHAT_ACCESS_SECRET,
-    url.searchParams.get(CHAT_ACCESS_QUERY_PARAM),
+  const result = await verifyChatAccessRequest(
+    request,
+    { chatAccess: env.CHAT_ACCESS_SECRET, cookie: env.COOKIE_SECRET },
+    planId,
   );
   if (!result.valid) return new Response("chat access denied", { status: 401 });
-  if (result.payload.planId !== planId) return new Response("chat access denied", { status: 403 });
 
   const db = getDb(env);
   const [row] = await db
@@ -122,7 +126,10 @@ async function authorizeChatAgent(request: Request, env: Bindings): Promise<Resp
     return new Response("chat access denied", { status: 403 });
   }
 
-  return null;
+  // 外部から同名ヘッダを注入されても、検証済み payload の値で必ず上書きする。
+  const headers = new Headers(request.headers);
+  headers.set(CHAT_ACCESS_EXPIRES_HEADER, String(result.payload.exp));
+  return new Request(request, { headers });
 }
 
 /**
@@ -137,8 +144,9 @@ async function authorizeChatAgent(request: Request, env: Bindings): Promise<Resp
 export default {
   async fetch(request: Request, env: Bindings, ctx: ExecutionContext): Promise<Response> {
     if (new URL(request.url).pathname.startsWith(CHAT_AGENT_PREFIX)) {
-      const denied = await authorizeChatAgent(request, env);
-      if (denied) return denied;
+      const authorized = await authorizeChatAgent(request, env);
+      if (authorized instanceof Response) return authorized;
+      request = authorized;
     }
     return (await routeAgentRequest(request, env, { cors: true })) ?? app.fetch(request, env, ctx);
   },

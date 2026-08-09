@@ -107,6 +107,29 @@ export const CreatePlanRequestSchema = z.object({
 });
 export type CreatePlanRequest = z.infer<typeof CreatePlanRequestSchema>;
 
+/**
+ * 計画作成レスポンス（POST /plans, #20）。
+ *
+ * 生成リクエストは Turnstile 検証を通っているため、同じ検証結果からこの計画専用の
+ * chat access token を併せて発行する。これによりしおり到達時に同じ人へ再チャレンジを
+ * 要求せずに常駐チャットへ接続できる。
+ */
+export const CreatePlanResponseSchema = z.object({
+  id: z.string(),
+  /** HttpOnly Cookie の有効期限(ISO)。クライアントは期限切れを検知して再取得する。 */
+  expiresAt: z.string(),
+});
+export type CreatePlanResponse = z.infer<typeof CreatePlanResponseSchema>;
+
+/**
+ * chat access token 発行レスポンス（POST /plans/:id/chat-access, #20）。
+ * Home の作成履歴や URL 直開きなど、生成フローを経ずに入る場合に使う。
+ */
+export const CreateChatAccessResponseSchema = z.object({
+  expiresAt: z.string(),
+});
+export type CreateChatAccessResponse = z.infer<typeof CreateChatAccessResponseSchema>;
+
 /** 計画取得レスポンス（GET /plans/:id, #16）。`plan` は完成前は下書き。 */
 export const GetPlanResponseSchema = z.object({
   id: z.string(),
@@ -167,3 +190,74 @@ export const ChatMessageSchema = z.object({
   createdAt: z.string(),
 });
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+
+/** チャット履歴の上限（1ページ）。DO SQLite より古い分は D1 アーカイブから読み足す。 */
+export const CHAT_HISTORY_DEFAULT_LIMIT = 20;
+export const CHAT_HISTORY_MAX_LIMIT = 50;
+
+/** 初回ページの境界解決に送れる live message id の上限。URL 長を抑えるための頭打ち。 */
+export const CHAT_HISTORY_MAX_BOUNDARY_IDS = 20;
+
+/**
+ * チャット履歴取得のクエリ（GET /plans/:id/chat, #20）。
+ * `before` は前ページの `nextCursor` をそのまま渡す opaque cursor。
+ *
+ * 初回の `beforeMessageIds` は DO が保持する live message の id を**古い順**に並べた
+ * カンマ区切り。サーバは D1 に存在する最初の1件を境界として解決し、その直前から返す。
+ * 単一の id ではなく列にするのは、live message が必ずしも D1 に居るとは限らないため
+ * （中断された assistant 発話や、計画未完成時の user 発話はアーカイブされない）。
+ * 解決できない id を境界にすると最新ページを返してしまい、client 側の重複除外で
+ * 可視行が増えないまま cursor だけ進み、過去へ到達できなくなる。
+ */
+export const ChatHistoryQuerySchema = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(CHAT_HISTORY_MAX_LIMIT)
+    .default(CHAT_HISTORY_DEFAULT_LIMIT),
+  before: z.string().optional(),
+  beforeMessageIds: z
+    .string()
+    .optional()
+    .transform((value) =>
+      (value ?? "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean)
+        .slice(0, CHAT_HISTORY_MAX_BOUNDARY_IDS),
+    ),
+});
+export type ChatHistoryQuery = z.infer<typeof ChatHistoryQuerySchema>;
+
+/**
+ * チャット履歴レスポンス（#20）。`messages` は表示順（古い順）で返す。
+ * `nextCursor` が null ならそれ以上古い履歴は無い。
+ */
+export const ChatHistoryResponseSchema = z.object({
+  messages: z.array(ChatMessageSchema),
+  nextCursor: z.string().nullable(),
+});
+export type ChatHistoryResponse = z.infer<typeof ChatHistoryResponseSchema>;
+
+/**
+ * チャットのストリームに載せる transient data（#20）。
+ *
+ * `useAgentChat` の `onData` で受け取る。メッセージ本文として永続化したくない
+ * 「実行中の状況」「提案が state に載った合図」「レート制限」をここで運ぶ。
+ * `type` は AI SDK の UI message stream の実際の形（`data-<name>`）に合わせる。
+ */
+export const ChatDataPartSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("data-activity"), data: z.object({ label: z.string() }) }),
+  z.object({ type: z.literal("data-proposal"), data: z.object({ editId: z.string() }) }),
+  z.object({ type: z.literal("data-rate-limit"), data: RateLimitStatusSchema }),
+  /**
+   * 修正案づくりの思考過程。`text` はその時点までの**全文**（差分ではない）。
+   *
+   * 質問応答の思考は assistant メッセージの reasoning パートとして流れるが、修正案づくりは
+   * メッセージを組み立てずに進むため、思考を載せる先が無い。ここで transient data として運ぶ。
+   * 差分ではなく全文にするのは、順序の入れ替わりや取りこぼしで思考が崩れないようにするため。
+   */
+  z.object({ type: z.literal("data-reasoning"), data: z.object({ text: z.string() }) }),
+]);
+export type ChatDataPart = z.infer<typeof ChatDataPartSchema>;

@@ -77,6 +77,32 @@ describe("GeocodingClient", () => {
     globalThis.fetch = originalFetch;
   });
 
+  it("呼び出し元の abortSignal で実行中 fetch とリトライを停止する", async () => {
+    const controller = new AbortController();
+    let requestSignal: AbortSignal | null | undefined;
+    globalThis.fetch = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+        requestSignal = init?.signal;
+        return await new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(init.signal?.reason ?? new Error("aborted")),
+            { once: true },
+          );
+        });
+      },
+    );
+    const client = new GeocodingClient({ apiKey: "google-key", abortSignal: controller.signal });
+
+    const pending = client.geocode("東京駅");
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+    controller.abort(new Error("cancelled"));
+
+    await expect(pending).rejects.toThrow("cancelled");
+    expect(requestSignal?.aborted).toBe(true);
+    expect(globalThis.fetch).toHaveBeenCalledOnce();
+  });
+
   it("Google APIキーがある場合は Google Geocoding API を呼び出すこと", async () => {
     const mockResponse = {
       status: "OK",

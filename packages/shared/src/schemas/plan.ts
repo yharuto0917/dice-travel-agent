@@ -87,12 +87,22 @@ export type PlanItem = z.infer<typeof PlanItemSchema>;
  * `anyOf` を回避する。各インスタンスは literal な type により本来の union のいずれかの
  * メンバーを必ず満たすため、生成結果はそのまま {@link PlanDaySchema} / {@link TravelPlanSchema}
  * の検証を通過する（生成専用。保存・検証は引き続き union 側で行う）。
+ *
+ * `description` は保存スキーマでは任意だが、**生成時は必須**にしている。任意のままだと
+ * Gemini がしおりの詳細説明をまるごと省略し、しおり画面にタイトルと時刻しか出ない日が
+ * できていたため（旧データとの互換のため保存側は任意のまま）。
  */
 export const PlanItemGenSchema = z.object({
   id: z.string(),
   type: PlanItemTypeSchema,
   title: z.string(),
-  description: z.string().optional(),
+  description: z
+    .string()
+    .trim()
+    .min(1)
+    .describe(
+      "しおりに載せる日本語の詳細説明（1〜2文）。何をする予定か、その場所の見どころ・楽しみ方を具体的に書く。空文字やタイトルの繰り返しは不可。",
+    ),
   startTime: z
     .string()
     .regex(/^([01]\d|2[0-3]):[0-5]\d$/)

@@ -16,6 +16,8 @@ export interface UsageCounter {
 export interface GeneratedImage {
   /** R2 配信URL（例: https://<api>/assets/generated/<uuid>.png）。 */
   url: string;
+  /** 却下・中断時に R2 から削除するための object key。 */
+  r2Key: string;
   /** 生成の元になった主題（alt テキストに使う）。 */
   prompt: string;
 }

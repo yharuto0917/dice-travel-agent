@@ -7,12 +7,13 @@ import {
   type TimelineEvent,
   type TravelPlanDraft,
 } from "@repo/shared";
-import { Agent, callable } from "agents";
+import { Agent, type Connection, callable } from "agents";
 import { eq } from "drizzle-orm";
 import { createClients } from "../clients";
 import { getDb } from "../db/client";
-import { type PlanRow, plans, planVersions } from "../db/schema";
+import { type PlanRow, plans } from "../db/schema";
 import type { Bindings } from "../env";
+import { persistPlanRevision } from "./chat/plan-persistence";
 import { createUsageCounter, HITL_TIMEOUT_SEC } from "./flow/judgement";
 import { dayCountOf, mergeDay, nightsOf } from "./flow/merge";
 import { runDay, type TimelineInput } from "./flow/orchestrator";
@@ -39,7 +40,18 @@ const TIMELINE_MAX = 200;
 export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
   initialState: AgentState = AgentStateSchema.parse({});
 
-  validateStateChange(next: AgentState): void {
+  /**
+   * state 更新の検証。スキーマ検証に加えて、クライアント起点の更新を拒否する。
+   *
+   * Agents SDK の state はクライアントからも `setState` で書き換えられる。許したままだと
+   * ブラウザから任意の `plan` を注入して確定計画として保存させられるため、state を
+   * 書き換えてよいのはサーバ（この Agent 自身）だけに限定する。UI からの操作は
+   * すべて `@callable` を経由させる。
+   */
+  validateStateChange(next: AgentState, source: Connection | "server"): void {
+    if (source !== "server") {
+      throw new Error("client state updates are not allowed");
+    }
     const result = AgentStateSchema.safeParse(next);
     if (!result.success) {
       throw new Error(`Invalid AgentState: ${result.error.message}`);
@@ -390,34 +402,9 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
 
   /** 完成計画を D1 に保存。上書き前に旧版を plan_versions へスナップショットする（#16）。 */
   private async persistPlan(finalPlan: TravelPlanDraft, row: PlanRow): Promise<void> {
-    const db = getDb(this.env);
-    const currentVersion = row.version ?? 1;
-
-    // 旧 plan がある場合のみ「旧版を currentVersion で退避 → 新版を +1」とする。
-    // 初回確定（旧 plan が null）はスナップショット対象が無いため version を据え置き、
-    // 最初の完成プランを version 1 として残す。据え置かないと最初の版が
-    // plan_versions に存在せず diff/履歴から永久に辿れなくなる。
-    const nextVersion = row.plan ? currentVersion + 1 : currentVersion;
-
-    if (row.plan) {
-      await db.insert(planVersions).values({
-        id: crypto.randomUUID(),
-        planId: this.name,
-        version: currentVersion,
-        plan: row.plan,
-      });
-    }
-
-    await db
-      .update(plans)
-      .set({
-        plan: finalPlan,
-        status: "completed",
-        title: finalPlan.title ?? row.title,
-        version: nextVersion,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(plans.id, this.name));
+    // 版更新の手順（スナップショット→version+1）はチャットの修正承認（#20）と共通のため、
+    // persistPlanRevision に集約している。
+    await persistPlanRevision(this.env, { plan: finalPlan, row, status: "completed" });
 
     // 次回 loadPlanRow で最新を読むようキャッシュを無効化する。
     this.cachedRow = undefined;

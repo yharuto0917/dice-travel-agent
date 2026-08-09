@@ -19,36 +19,43 @@ export * from "./weather";
 /**
  * Hono の環境変数 (Bindings) からすべての API クライアントインスタンスを一括生成するファクトリ関数。
  */
-export function createClients(env: Bindings) {
+export function createClients(env: Bindings, abortSignal?: AbortSignal) {
   return {
     geocoding: new GeocodingClient({
       apiKey: env.GOOGLE_MAPS_API_KEY,
       kv: env.KV,
+      abortSignal,
     }),
     poi: new PoiClient({
       googleApiKey: env.GOOGLE_MAPS_API_KEY,
       foursquareKey: env.FOURSQUARE_KEY,
       kv: env.KV,
+      abortSignal,
     }),
     weather: new WeatherClient({
       kv: env.KV,
+      abortSignal,
     }),
     lodging: new LodgingClient({
       applicationId: env.RAKUTEN_APP_ID,
       kv: env.KV,
+      abortSignal,
     }),
     restaurant: new RestaurantClient({
       apiKey: env.HOTTOPEPPER_KEY,
       kv: env.KV,
+      abortSignal,
     }),
     transit: new TransitClient({
       googleApiKey: env.GOOGLE_MAPS_API_KEY,
       kv: env.KV,
+      abortSignal,
     }),
     image: new ImageClient({
       unsplashAccessKey: env.UNSPLASH_ACCESS_KEY,
       pexelsApiKey: env.PEXELS_API_KEY,
       kv: env.KV,
+      abortSignal,
     }),
   };
 }

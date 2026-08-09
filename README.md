@@ -69,6 +69,30 @@ TabiDice は、Cloudflare のエッジコンピューティング環境（Cloudf
 1. **Cloudflare Turnstile**: 人間性検証をフロントエンドで行いボットによる大量アクセスを防ぎます。
 2. **レートリミット (Cookie/IP単位)**: 一定時間内のプラン生成・チャット送信回数をデータベース/メモリ上でカウントし制御します。
 
+### 常駐チャットの接続認可 (chat access token)
+常駐チャットは Durable Object の WebSocket (`/agents/travel-chat-agent/{planId}`) で動くため、Cookie ミドルウェアを経由しません。そこで **planId 限定・短期 (2時間) の署名付きトークン** を発行し、接続時に Worker 側で検証します。
+
+* **計画生成から進む場合**: `POST /plans` が Turnstile 検証を通ったリクエストの中でトークンも返すため、しおり到達時に再チャレンジを求めません。
+* **Home の作成履歴・URL 直開きの場合**: 所有者確認 → Turnstile 検証を通してから `POST /plans/:id/chat-access` でトークンを発行します。
+* トークンは `planId` / `clientId` / 有効期限を署名対象に含むため、他の計画へ流用したり、別のクライアントが使い回すことはできません。
+
+認可ゲートの経路判定は、実際に Durable Object へ振り分ける partyserver とまったく同じ規則 (`pathname.split("/").filter(Boolean)`) で行います。接頭辞の前方一致で判定すると `/agents//travel-chat-agent/{planId}` のように空セグメントを挟んだ URL がゲートだけを迂回し、`AIChatAgent` の `/get-messages`（会話全文を返す HTTP エンドポイント）へ到達できてしまうためです。
+
+トークンの署名鍵は `CHAT_ACCESS_SECRET` です。ローカル開発では `apps/api/.dev.vars` に、本番では `wrangler secret put CHAT_ACCESS_SECRET` で設定してください（未設定の場合、計画生成とチャット接続が失敗します）。Turnstile 側はローカルでは公式テストサイトキー／`TURNSTILE_SECRET_KEY` 未設定時の検証バイパスがそのまま働きます。
+
+### Durable Object のマイグレーション
+常駐チャット用に `TravelChatAgent` (SQLite-backed Durable Object) を追加しています（`apps/api/wrangler.json` の migration tag `v2`）。D1 側のスキーマ変更はマイグレーションファイルで管理し、`drizzle-kit push` は使用しません。
+
+```bash
+pnpm --filter @repo/api db:generate      # スキーマ変更からマイグレーションを生成
+pnpm --filter @repo/api db:migrate:local # ローカル D1 へ適用
+pnpm --filter @repo/api db:migrate       # 本番 D1 へ適用
+```
+
+`0004_nice_scorpion.sql` は、旧実装の並行確定で生じうる重複 `(plan_id, version)` を
+保存日時が最も早い1行へ整理してから `UNIQUE INDEX` を追加します。既存データに重複が
+残っていても migration を適用でき、適用後は同じ版の二重保存がデータベース側でも拒否されます。
+
 ---
 
 ## 📂 プロジェクト構成
@@ -97,6 +121,5 @@ TabiDice は、Cloudflare のエッジコンピューティング環境（Cloudf
 * `pnpm test`: Vitest による単体・統合テストの実行
 * `pnpm typegen`: Cloudflare Bindings の型定義生成
 * `pnpm deploy`: 本番環境へのデプロイ
-
 
 

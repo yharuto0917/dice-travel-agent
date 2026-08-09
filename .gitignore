@@ -30,6 +30,7 @@ worker-configuration.d.ts
 
 # DS-Store
 .DS-Store
+.DS_Store
 
 # VSCode
 .vscode/

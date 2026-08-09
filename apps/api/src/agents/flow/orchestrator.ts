@@ -88,15 +88,25 @@ const MAX_DESC_LEN = 800;
 function clampText(s: string | undefined, max: number): string | undefined {
   if (s === undefined) return undefined;
   const t = s.trim();
+  // 空白だけの値は「無い」と同じ扱いにする（description に "" が残ると UI 側の
+  // 有無判定はすり抜けるのに何も表示されない、という分かりにくい状態になる）。
+  if (t === "") return undefined;
   return t.length > max ? t.slice(0, max).trimEnd() : t;
 }
 
 /**
  * 生成された PlanDay の文字列フィールドを安全長に切り詰める。LLM の退行で混入した
  * 巨大な run-on 文字列がそのまま title/description に残るのを防ぐ防御層。
+ *
+ * 保存スキーマでは後方互換のため description が optional。生成経路ではサニタイズ後にも
+ * 生成用スキーマを再検証し、空白→undefined へ落ちた item を保存させない。
+ *
+ * 検証を通らなかった場合は**例外ではなく null** を返す。ここは `runDay` の非同期処理の
+ * 途中（try/catch の外）から呼ばれるため、投げると 1 item の description が空白だっただけで
+ * その日の生成が丸ごと落ちる。呼び出し側で別経路へ切り替えられるよう戻り値で返す。
  */
-function sanitizeDay(day: PlanDay): PlanDay {
-  return {
+function sanitizeDay(day: PlanDay): PlanDay | null {
+  const sanitized = {
     ...day,
     title: clampText(day.title, MAX_TITLE_LEN),
     items: day.items.map((item) => ({
@@ -105,6 +115,8 @@ function sanitizeDay(day: PlanDay): PlanDay {
       description: clampText(item.description, MAX_DESC_LEN),
     })),
   };
+  const result = PlanDayGenSchema.safeParse(sanitized);
+  return result.success ? (result.data as PlanDay) : null;
 }
 
 /** 画像を生成する対象の種別。観光名所（観光スポット `spot`）のみに限定する（#18）。 */
@@ -118,12 +130,19 @@ const MAX_IMAGES_PER_DAY = 6;
  *
  * 観光名所（{@link IMAGE_TARGET_TYPES} = `spot`）のうち、まだ image を持たないものを上限まで採る。
  * 食事・宿・移動・体験・自由時間には生成しない。観光名所を1件も含まない日は画像なしになる。
+ *
+ * `limit` は生成枚数の上限。既定は1日あたりの上限だが、チャットの修正経路のように
+ * 「修正1回あたり」で予算を配る呼び出し側が、残り枚数を渡して絞り込めるようにしている。
  */
-export function selectImageTargets(items: PlanItem[]): { index: number; item: PlanItem }[] {
+export function selectImageTargets(
+  items: PlanItem[],
+  limit: number = MAX_IMAGES_PER_DAY,
+): { index: number; item: PlanItem }[] {
+  if (limit <= 0) return [];
   return items
     .map((item, index) => ({ item, index }))
     .filter(({ item }) => !item.image && IMAGE_TARGET_TYPES.has(item.type))
-    .slice(0, MAX_IMAGES_PER_DAY);
+    .slice(0, limit);
 }
 
 /**
@@ -357,24 +376,22 @@ export async function runDay(
   // finalizedDay はクロージャ内でのみ代入されるため TS は初期値 null から型を広げられない。
   // キャストで宣言型に戻してから items の有無で絞り込む。
   const finalized = finalizedDay as PlanDay | null;
+  // finalizeDay 由来の日はサニタイズ・再検証を通ったものだけ採用する。落ちた場合（description が
+  // 空白だけ、など）は null になり、下の構造化経路へ回る。
+  const sanitizedFinalized =
+    finalized && finalized.items.length > 0 ? sanitizeDay({ ...finalized, dayNumber: n }) : null;
+
   let day: PlanDay;
-  if (finalized && finalized.items.length > 0) {
-    day = sanitizeDay({ ...finalized, dayNumber: n });
+  if (sanitizedFinalized) {
+    day = sanitizedFinalized;
   } else {
-    // 構造化: finalizeDay 未到達／空でも、ストリーム中に集めたツール結果・最終テキストと
+    // 構造化: finalizeDay 未到達／空／検証落ちでも、ストリーム中に集めたツール結果・最終テキストと
     // 目的地コンテキストを根拠に当日の itinerary を必ず組み立てる。ツールデータが乏しくても
     // モデルの知識で実在の有名スポット/飲食店を補い、items を空にしない。
     onActivity?.("日程をまとめています…", "");
     const structured = await structureDay(env, ctx, plan, n, finalText, toolNotes);
-    if (structured && structured.items.length > 0) {
-      day = structured;
-    } else if (finalized) {
-      // 最終フォールバック: 構造化できなくても finalizeDay があればそれを採用する。
-      day = sanitizeDay({ ...finalized, dayNumber: n });
-    } else {
-      // 決定的な最小日（空 items）を返す（呼び出し側 checker/fix が後段で補う）。
-      day = structured ?? { dayNumber: n, title: `${n}日目`, items: [] };
-    }
+    // 決定的な最小日（空 items）は最後の砦（呼び出し側 checker/fix が後段で補う）。
+    day = structured?.items.length ? structured : { dayNumber: n, title: `${n}日目`, items: [] };
   }
 
   // 各アイテムへ内容一致の風景画像を決定的に生成・埋め込む（各日2枚以上, #18）。
@@ -437,7 +454,7 @@ async function structureDay(
         } satisfies GoogleGenerativeAIProviderOptions,
       },
       system:
-        "あなたは1日分の旅行旅程を構造化 PlanDay として組み立てる専門家です。妥当な startTime を付けた4〜7件の、現実的で順序立てた予定（観光スポット・食事・移動など）を必ず作成してください。優先順位は次の通りです: (1) ツールデータにある実在の名称・住所を最優先で使う。(2) ツールデータが不足している場合は、目的地に実在するよく知られた観光スポット・飲食店・名所をあなたの知識から補う。架空の場所を作ってはいけませんが、items を空にすることは絶対に禁止です——必ず具体的な予定で埋めてください。前日までに訪問済みのスポット・飲食店は再訪・重複させず、前日の最終地点・宿泊地から自然につながる動線にし、旅行全体の予算を意識すること。スキーマや検証に関するメタ的な文言をどのフィールドにも書かないこと。出力（title・description・各 item の名称など、すべての自然言語フィールド）は必ず日本語で記述してください。`title` は『N日目』のような短いラベルにしてください。",
+        "あなたは1日分の旅行旅程を構造化 PlanDay として組み立てる専門家です。妥当な startTime を付けた4〜7件の、現実的で順序立てた予定（観光スポット・食事・移動など）を必ず作成してください。優先順位は次の通りです: (1) ツールデータにある実在の名称・住所を最優先で使う。(2) ツールデータが不足している場合は、目的地に実在するよく知られた観光スポット・飲食店・名所をあなたの知識から補う。架空の場所を作ってはいけませんが、items を空にすることは絶対に禁止です——必ず具体的な予定で埋めてください。各 item には `description`（日本語1〜2文の詳細説明）を必ず付け、しおりの読者向けに「そこで何をするか」「見どころ・名物」を具体的に書くこと（タイトルの言い換えや空文字は不可）。前日までに訪問済みのスポット・飲食店は再訪・重複させず、前日の最終地点・宿泊地から自然につながる動線にし、旅行全体の予算を意識すること。スキーマや検証に関するメタ的な文言をどのフィールドにも書かないこと。出力（title・description・各 item の名称など、すべての自然言語フィールド）は必ず日本語で記述してください。`title` は『N日目』のような短いラベルにしてください。",
       prompt: `対象は ${n}日目です。\n\n旅行のコンテキスト:\n${contextBlock}\n\nこれまでに確定した日程（重複させない／動線をつなぐ）:\n${priorBlock}\n\nプランナーのメモ:\n${plannerText || "(なし)"}\n\nツールで収集したデータ:\n${dataBlock}`,
     });
     // 生成スキーマ（フラット）→ 保存スキーマ（union）。type により union のいずれかを

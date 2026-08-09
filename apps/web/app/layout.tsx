@@ -23,6 +23,10 @@ export const metadata: Metadata = {
   description:
     "サイコロで行き先を決めて、AI Agentがミニチュアの日本を旅するしおりを自動で作成します。",
   applicationName: "TabiDice",
+  icons: {
+    icon: "/TabiDice.jpg",
+    apple: "/TabiDice.jpg",
+  },
 };
 
 export const viewport: Viewport = {

@@ -89,17 +89,9 @@ pnpm --filter @repo/api db:migrate:local # ローカル D1 へ適用
 pnpm --filter @repo/api db:migrate       # 本番 D1 へ適用
 ```
 
-> **`0004_nice_scorpion.sql` を本番へ適用する前に**、`plan_versions` に重複した
-> `(plan_id, version)` 行が無いことを確認してください。この migration は
-> `UNIQUE INDEX` を張るため、重複が1件でもあると適用が失敗します。旧実装の版更新は
-> CAS を伴わず、並行した確定処理で重複を作りうる状態でした。
->
-> ```bash
-> pnpm --filter @repo/api exec wrangler d1 execute DB --remote \
->   --command "SELECT plan_id, version, COUNT(*) AS n FROM plan_versions GROUP BY 1, 2 HAVING n > 1"
-> ```
->
-> 0件なら、そのまま適用できます。
+`0004_nice_scorpion.sql` は、旧実装の並行確定で生じうる重複 `(plan_id, version)` を
+保存日時が最も早い1行へ整理してから `UNIQUE INDEX` を追加します。既存データに重複が
+残っていても migration を適用でき、適用後は同じ版の二重保存がデータベース側でも拒否されます。
 
 ---
 
@@ -129,6 +121,5 @@ pnpm --filter @repo/api db:migrate       # 本番 D1 へ適用
 * `pnpm test`: Vitest による単体・統合テストの実行
 * `pnpm typegen`: Cloudflare Bindings の型定義生成
 * `pnpm deploy`: 本番環境へのデプロイ
-
 
 

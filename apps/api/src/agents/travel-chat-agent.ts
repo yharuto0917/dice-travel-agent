@@ -26,6 +26,7 @@ import type { Bindings } from "../env";
 import { CHAT_ACCESS_EXPIRES_HEADER, isChatAccessExpired } from "../lib/chat-access-token";
 import { consumeRateLimit } from "../lib/rate-limit";
 import { streamChatAnswer } from "./chat/answer";
+import { CHAT_MESSAGE_CONCURRENCY } from "./chat/concurrency";
 import { createChatToolContext } from "./chat/context";
 import { createPlanEdit } from "./chat/edit";
 import { classifyIntent } from "./chat/intent";
@@ -83,8 +84,14 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
 
   maxPersistedMessages = MAX_PERSISTED_MESSAGES;
 
-  /** 送信が重なっても取りこぼさず順に処理する（会話の因果を保つ）。 */
-  messageConcurrency = "queue" as const;
+  /**
+   * 応答中の重複 submit は永続化前に拒否する。
+   *
+   * queue にすると、先のターンが始まる前に後続 user message まで `this.messages` へ入り、
+   * 先のターンが後続発話を処理してしまう。通常 UI でも入力をロックするが、直接接続する
+   * クライアントからの重複送信に対しても会話の因果を壊さないようサーバ側で防ぐ。
+   */
+  messageConcurrency: typeof CHAT_MESSAGE_CONCURRENCY = CHAT_MESSAGE_CONCURRENCY;
 
   /**
    * state 更新の検証。スキーマ検証に加えてクライアント起点の更新を拒否する。
@@ -168,17 +175,12 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
     return row ?? null;
   }
 
-  /** 直近の user メッセージの本文を取り出す。 */
-  private latestUserText(): string | null {
+  /** 直近の user メッセージを取り出す。本文と archive ID を同じ発話へ固定する。 */
+  private latestUserMessage(): UIMessage | null {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const message = this.messages[i];
       if (message?.role !== "user") continue;
-      const text = message.parts
-        .filter((part): part is { type: "text"; text: string } => part.type === "text")
-        .map((part) => part.text)
-        .join("")
-        .trim();
-      return text.length > 0 ? text : null;
+      return message;
     }
     return null;
   }
@@ -249,7 +251,8 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
       return this.respondWithText(PLAN_NOT_READY_REPLY);
     }
 
-    const rawText = this.latestUserText();
+    const userMessage = this.latestUserMessage();
+    const rawText = userMessage ? textOf(userMessage).trim() : null;
     const parsed = SendChatMessageRequestSchema.safeParse({ content: rawText ?? "" });
     if (!parsed.success) {
       return this.respondWithText("メッセージを入力してください（2000文字以内）。");
@@ -260,8 +263,7 @@ export class TravelChatAgent extends AIChatAgent<Bindings, TravelChatState> {
     // 通らないため、計画の所有者 clientId を D1 の行から引いてカウントする。
     const limit = await consumeRateLimit(getDb(this.env), row.clientId, "chat");
 
-    const userMessage = this.messages.at(-1);
-    if (userMessage?.role === "user") {
+    if (userMessage) {
       await this.archiveMessage(userMessage.id, "user", content);
     }
 

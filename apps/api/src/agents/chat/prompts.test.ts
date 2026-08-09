@@ -35,7 +35,16 @@ const plan: TravelPlan = {
       dayNumber: 1,
       title: "下町めぐり",
       items: [
-        { id: "i1", type: "spot", title: "浅草寺", startTime: "10:00" },
+        {
+          id: "i1",
+          type: "spot",
+          title: "浅草寺",
+          description: "雷門から本堂まで仲見世通りを歩き、境内を参拝します。",
+          startTime: "10:00",
+          durationMin: 90,
+          cost: { amount: 500, currency: "JPY", approx: true },
+          location: { name: "浅草寺", address: "東京都台東区浅草2-3-1" },
+        },
         { id: "i2", type: "meal", title: "天ぷら屋", startTime: "12:30" },
       ],
     },
@@ -64,10 +73,14 @@ describe("chat/prompts planSummary", () => {
     expect(summary).toContain("歩きすぎない旅程で");
   });
 
-  it("各日の予定を時刻付きで列挙する", () => {
+  it("各日の予定を保存済みの詳細付きで列挙する", () => {
     const summary = planSummary(plan);
     expect(summary).toContain("1日目");
     expect(summary).toContain("10:00 浅草寺");
+    expect(summary).toContain("場所=浅草寺 / 東京都台東区浅草2-3-1");
+    expect(summary).toContain("所要=90分");
+    expect(summary).toContain("費用=約500円");
+    expect(summary).toContain("説明=雷門から本堂まで仲見世通りを歩き、境内を参拝します。");
     expect(summary).toContain("2日目");
     expect(summary).toContain("渋谷");
   });

@@ -8,6 +8,7 @@ import {
   createReasoningReporter,
   exceedsEditDayLimit,
   isDegenerateDay,
+  mergeEditedDay,
   normalizeStartTime,
   resolveTargetDays,
   sanitizeGeneratedDay,
@@ -89,6 +90,83 @@ describe("chat/edit buildPendingEdit", () => {
     const a = buildPendingEdit(plan, plan, "変更なし");
     const b = buildPendingEdit(plan, plan, "変更なし");
     expect(a.id).not.toBe(b.id);
+  });
+});
+
+describe("chat/edit mergeEditedDay", () => {
+  it("差し替えた日の費用差分を内訳と合計へ反映する", () => {
+    const current: TravelPlan = {
+      ...plan,
+      days: [
+        {
+          dayNumber: 1,
+          items: [
+            {
+              id: "old-transport",
+              type: "transport",
+              title: "電車",
+              cost: { amount: 1000, currency: "JPY", approx: true },
+            },
+            {
+              id: "old-meal",
+              type: "meal",
+              title: "昼食",
+              cost: { amount: 2000, currency: "JPY", approx: true },
+            },
+          ],
+        },
+        plan.days[1] as PlanDay,
+      ],
+      budget: {
+        transport: { amount: 5000, currency: "JPY", approx: true },
+        food: { amount: 8000, currency: "JPY", approx: true },
+        total: { amount: 30000, currency: "JPY", approx: true },
+      },
+    };
+    const replacement: PlanDay = {
+      dayNumber: 1,
+      items: [
+        {
+          id: "new-transport",
+          type: "transport",
+          title: "特急",
+          cost: { amount: 2500, currency: "JPY", approx: true },
+        },
+        {
+          id: "new-meal",
+          type: "meal",
+          title: "軽食",
+          cost: { amount: 1000, currency: "JPY", approx: true },
+        },
+        {
+          id: "new-spot",
+          type: "spot",
+          title: "展望台",
+          cost: { amount: 500, currency: "JPY", approx: true },
+        },
+      ],
+    };
+
+    const merged = mergeEditedDay(current, replacement);
+
+    expect(merged.days?.[0]).toEqual(replacement);
+    expect(merged.budget?.transport?.amount).toBe(6500);
+    expect(merged.budget?.food?.amount).toBe(7000);
+    expect(merged.budget?.activities?.amount).toBe(500);
+    expect(merged.budget?.total?.amount).toBe(31000);
+  });
+
+  it("item.cost が無い日の編集では既存予算を変えない", () => {
+    const current: TravelPlan = {
+      ...plan,
+      budget: { total: { amount: 40000, currency: "JPY", approx: true } },
+    };
+    const replacement: PlanDay = {
+      dayNumber: 1,
+      items: [{ id: "new", type: "spot", title: "上野公園" }],
+    };
+
+    expect(mergeEditedDay(current, replacement).budget).toEqual(current.budget);
   });
 });
 

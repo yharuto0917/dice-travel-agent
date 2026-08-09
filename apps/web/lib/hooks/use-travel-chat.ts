@@ -100,6 +100,8 @@ export function useTravelChat({
   // 初回ロードが済むまで nextCursor（null）を「もう無い」と誤判定しないための印。
   const archiveLoadedRef = useRef(false);
   const loadingArchiveRef = useRef(false);
+  // React が status="submitted" を描画する前の同一 tick でも二重送信させない同期ロック。
+  const sendLockedRef = useRef(false);
 
   const agent = useAgent<TravelChatState>({
     agent: TRAVEL_CHAT_AGENT_NAME,
@@ -130,11 +132,16 @@ export function useTravelChat({
     onError: () => setActivity(null),
   });
 
-  const { messages, sendMessage, status, isStreaming } = chat;
+  const { messages, sendMessage, status } = chat;
+  // SDK の isStreaming は本文受信中だけ。送信済み・応答待ちの submitted も入力を止める。
+  const isStreaming = status === "submitted" || status === "streaming";
 
   // 応答が終わったら実行状況の表示を消す（エラー・中断でも残さない）。
   useEffect(() => {
-    if (status === "ready" || status === "error") setActivity(null);
+    if (status === "ready" || status === "error") {
+      setActivity(null);
+      sendLockedRef.current = false;
+    }
   }, [status]);
 
   const loadArchivePage = useCallback(
@@ -192,12 +199,17 @@ export function useTravelChat({
 
   const send = useCallback(
     (text: string) => {
+      // status 更新より先に複数の click / Enter が来ても、最初の1件だけを送る。
+      if (sendLockedRef.current || status === "submitted" || status === "streaming") return;
+      sendLockedRef.current = true;
       // 前のターンの思考はここで捨てる。応答の終了では消さないので、提案を眺めている間は
       // 「なぜこの案になったか」を開いて読める。
       setReasoning(null);
-      sendMessage({ text });
+      void sendMessage({ text }).catch(() => {
+        sendLockedRef.current = false;
+      });
     },
-    [sendMessage],
+    [sendMessage, status],
   );
 
   const loadOlder = useCallback((): boolean => {

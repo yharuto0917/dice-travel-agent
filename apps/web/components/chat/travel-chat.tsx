@@ -94,7 +94,7 @@ export function TravelChat({ chat }: { chat: ReturnType<typeof useTravelChat> })
                   key={suggestion}
                   type="button"
                   onClick={() => send(suggestion)}
-                  disabled={exhausted}
+                  disabled={isStreaming || exhausted}
                   className="rounded-full border border-line bg-surface-2 px-2.5 py-1 text-[0.7rem] font-bold text-foreground transition hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                 >
                   {suggestion}

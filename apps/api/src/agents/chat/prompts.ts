@@ -1,4 +1,4 @@
-import type { TravelPlan } from "@repo/shared";
+import type { PlanItem, TravelPlan } from "@repo/shared";
 
 /**
  * 常駐チャット（#20）のプロンプト。
@@ -10,6 +10,33 @@ import type { TravelPlan } from "@repo/shared";
 
 /** 計画要約に載せる1日あたりの予定件数の上限。長い旅程でも文脈を膨らませない。 */
 const MAX_ITEMS_PER_DAY = 12;
+
+/** 旧データの長文説明で会話コンテキストを圧迫しないための1予定あたり上限。 */
+const MAX_ITEM_DETAIL_LEN = 240;
+
+function compactDetail(value: string, max: number = MAX_ITEM_DETAIL_LEN): string {
+  const compacted = value.replace(/\s+/g, " ").trim();
+  return compacted.length > max ? `${compacted.slice(0, max)}…` : compacted;
+}
+
+/** 質問回答に必要な予定の保存済み詳細を、1行へ圧縮して表す。 */
+function itemSummary(item: PlanItem): string {
+  const time = item.startTime ? `${item.startTime} ` : "";
+  const details = [`種別=${item.type}`];
+  if (item.location) {
+    const location = [item.location.name, item.location.address]
+      .filter((value): value is string => Boolean(value?.trim()))
+      .map((value) => compactDetail(value, 120))
+      .join(" / ");
+    if (location) details.push(`場所=${location}`);
+  }
+  if (item.durationMin != null) details.push(`所要=${item.durationMin}分`);
+  if (item.cost) {
+    details.push(`費用=${item.cost.approx ? "約" : ""}${item.cost.amount}円`);
+  }
+  if (item.description) details.push(`説明=${compactDetail(item.description)}`);
+  return `  - ${time}${compactDetail(item.title, 120)}（${details.join(" / ")}）`;
+}
 
 /**
  * 会話・質問応答の共通ルール。
@@ -48,13 +75,7 @@ export function planSummary(plan: TravelPlan): string {
   if (conditionParts.length > 0) lines.push(`条件: ${conditionParts.join(" / ")}`);
 
   for (const day of plan.days) {
-    const items = day.items
-      .slice(0, MAX_ITEMS_PER_DAY)
-      .map((item) => {
-        const time = item.startTime ? `${item.startTime} ` : "";
-        return `  - ${time}${item.title}（${item.type}）`;
-      })
-      .join("\n");
+    const items = day.items.slice(0, MAX_ITEMS_PER_DAY).map(itemSummary).join("\n");
     const omitted =
       day.items.length > MAX_ITEMS_PER_DAY
         ? `\n  - …ほか${day.items.length - MAX_ITEMS_PER_DAY}件`

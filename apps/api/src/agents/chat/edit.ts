@@ -1,5 +1,6 @@
 import type { GoogleGenerativeAIProviderOptions } from "@ai-sdk/google";
 import {
+  type BudgetBreakdown,
   type PendingPlanEdit,
   type PlanDay,
   PlanDayGenSchema,
@@ -137,6 +138,75 @@ export function resolveTargetDays(plan: TravelPlan, dayNumbers: number[]): numbe
 /** 生成コスト上限を超える対象日数か。 */
 export function exceedsEditDayLimit(dayNumbers: number[]): boolean {
   return dayNumbers.length > MAX_EDIT_DAYS;
+}
+
+type BudgetCategory = Exclude<keyof BudgetBreakdown, "total">;
+
+const BUDGET_CATEGORIES: BudgetCategory[] = ["transport", "lodging", "food", "activities", "other"];
+
+const ITEM_BUDGET_CATEGORY: Record<PlanItem["type"], BudgetCategory> = {
+  transport: "transport",
+  lodging: "lodging",
+  meal: "food",
+  spot: "activities",
+  activity: "activities",
+  free: "other",
+};
+
+/** 1日分の明示済み item.cost を予算カテゴリ別に合計する。 */
+function dayCosts(day: PlanDay | undefined): Record<BudgetCategory, number> {
+  const costs: Record<BudgetCategory, number> = {
+    transport: 0,
+    lodging: 0,
+    food: 0,
+    activities: 0,
+    other: 0,
+  };
+  for (const item of day?.items ?? []) {
+    if (!item.cost) continue;
+    costs[ITEM_BUDGET_CATEGORY[item.type]] += item.cost.amount;
+  }
+  return costs;
+}
+
+/**
+ * 編集した日を合成し、その日の明示済み費用の増減をトップレベル予算へ反映する。
+ *
+ * `budget` は item.cost だけでは表せない概算（未確定の交通費など）も含み得るため、
+ * 計画全体を item.cost の合計へ置き換えず、差し替えた日の差分だけを既存値へ加減する。
+ */
+export function mergeEditedDay(plan: TravelPlanDraft, day: PlanDay): TravelPlanDraft {
+  const previous = plan.days?.find((candidate) => candidate.dayNumber === day.dayNumber);
+  const merged = mergeDay(plan, day);
+  if (!plan.budget) return merged;
+
+  const before = dayCosts(previous);
+  const after = dayCosts(day);
+  const budget: BudgetBreakdown = { ...plan.budget };
+  let totalDelta = 0;
+
+  for (const category of BUDGET_CATEGORIES) {
+    const delta = after[category] - before[category];
+    totalDelta += delta;
+    if (delta === 0) continue;
+
+    const current = budget[category];
+    if (current) {
+      budget[category] = { ...current, amount: Math.max(0, current.amount + delta) };
+    } else if (before[category] === 0 && after[category] > 0) {
+      // 既存内訳に無かったカテゴリが今回初めて増えた場合だけ、新しい内訳として表示する。
+      budget[category] = { amount: after[category], currency: "JPY", approx: true };
+    }
+  }
+
+  if (budget.total && totalDelta !== 0) {
+    budget.total = {
+      ...budget.total,
+      amount: Math.max(0, budget.total.amount + totalDelta),
+    };
+  }
+
+  return { ...merged, budget };
 }
 
 /**
@@ -698,7 +768,7 @@ export async function createPlanEdit(
     // 据え置かれた予定の画像を戻してから合成する。新規生成の枠は、これで画像が
     // 付かなかった＝本当に増えた観光スポットだけに使う。
     const previous = draft.days?.find((d) => d.dayNumber === dayNumber);
-    draft = mergeDay(draft, carryOverImages(previous, day));
+    draft = mergeEditedDay(draft, carryOverImages(previous, day));
   }
 
   // 画像を作る前に計画本体を検証する。不採用の計画のために R2 object を作らない。

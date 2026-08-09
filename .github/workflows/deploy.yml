@@ -46,12 +46,22 @@ jobs:
           AI_GATEWAY_TOKEN: ${{ secrets.AI_GATEWAY_TOKEN }}
           TURNSTILE_SECRET_KEY: ${{ secrets.TURNSTILE_SECRET_KEY }}
           COOKIE_SECRET: ${{ secrets.COOKIE_SECRET }}
+          CHAT_ACCESS_SECRET: ${{ secrets.CHAT_ACCESS_SECRET }}
         run: |
+          # 未設定の GitHub Secret を空文字のまま同期すると Worker 側で静かに壊れる
+          # （CHAT_ACCESS_SECRET が漏れて計画生成・チャット接続が 500 になった事故の再発防止）。
+          for name in GEMINI_API_KEY AI_GATEWAY_TOKEN TURNSTILE_SECRET_KEY COOKIE_SECRET CHAT_ACCESS_SECRET; do
+            if [ -z "${!name}" ]; then
+              echo "::error::GitHub Secret ${name} が未設定です。設定してから再実行してください。"
+              exit 1
+            fi
+          done
           jq -n \
             '{GEMINI_API_KEY: env.GEMINI_API_KEY,
               AI_GATEWAY_TOKEN: env.AI_GATEWAY_TOKEN,
               TURNSTILE_SECRET_KEY: env.TURNSTILE_SECRET_KEY,
-              COOKIE_SECRET: env.COOKIE_SECRET}' > secrets.json
+              COOKIE_SECRET: env.COOKIE_SECRET,
+              CHAT_ACCESS_SECRET: env.CHAT_ACCESS_SECRET}' > secrets.json
           pnpm exec wrangler secret bulk secrets.json
           rm -f secrets.json
 

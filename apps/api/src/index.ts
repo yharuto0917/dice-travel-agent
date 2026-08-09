@@ -12,6 +12,7 @@ import {
   isChatAgentPath,
   verifyChatAccessRequest,
 } from "./lib/chat-access-token";
+import { agentCorsHeaders, isAllowedOrigin, withCors } from "./lib/cors";
 import { peekRateLimit } from "./lib/rate-limit";
 import { clientId } from "./middleware/client-id";
 import plansRoute from "./routes/plans";
@@ -20,15 +21,6 @@ export { TravelChatAgent } from "./agents/travel-chat-agent";
 // Durable Object クラスを Worker のエントリから re-export する（wrangler が DO として登録）。
 export { TravelPlanningAgent } from "./agents/travel-planning-agent";
 
-/** 開発時に許可するフロントのオリジン（本番は WEB_ORIGIN で指定）。 */
-const DEV_ORIGINS = [
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "http://localhost:8787",
-  "http://localhost:8788",
-  "http://localhost:8789",
-];
-
 const app = new Hono<AppEnv>({ strict: false });
 
 // 資格情報付き fetch（credentials: "include"）で Cookie を送受信できるよう
@@ -36,11 +28,7 @@ const app = new Hono<AppEnv>({ strict: false });
 app.use(
   "*",
   cors({
-    origin: (origin, c) => {
-      if (c.env.WEB_ORIGIN && origin === c.env.WEB_ORIGIN) return origin;
-      if (DEV_ORIGINS.includes(origin)) return origin;
-      return undefined;
-    },
+    origin: (origin, c) => (isAllowedOrigin(origin, c.env) ? origin : undefined),
     credentials: true,
   }),
 );
@@ -141,19 +129,36 @@ async function authorizeChatAgent(
  * 経路判定は接頭辞の前方一致ではなく、振り分け側（partyserver）と同じセグメント分解で行う
  * （{@link chatAgentPlanIdFromPath} 参照）。前方一致だと `/agents//travel-chat-agent/...` が
  * ゲートを素通りしたまま DO へ到達する。
+ *
+ * CORS ヘッダは SDK 任せ（`cors: true`）にせず、ここで組み立てたものを渡す。WebSocket は
+ * CORS の対象外なので接続は成立するが、Agent の HTTP エンドポイント（`/get-messages`）は
+ * 資格情報付き fetch であり、ワイルドカードのままではブラウザに遮断される。
  */
 export default {
   async fetch(request: Request, env: Bindings, ctx: ExecutionContext): Promise<Response> {
     const pathname = new URL(request.url).pathname;
+    const corsHeaders = agentCorsHeaders(request, env);
+
     if (isChatAgentPath(pathname)) {
+      // プリフライトは仕様上 Cookie を運ばないため、認可ゲートに掛けると必ず 401 になり、
+      // 本リクエストが送られる前にブラウザが遮断する。planId によらず一律で答えるので、
+      // ゲートより前に返しても計画の存在有無は漏れない。
+      if (request.method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders });
+      }
+
       const planId = chatAgentPlanIdFromPath(pathname);
       // planId の形が不正なら DO へ渡さず終わらせる（存在有無も明かさない）。
-      if (!planId) return new Response("plan not found", { status: 404 });
+      if (!planId) return withCors(new Response("plan not found", { status: 404 }), corsHeaders);
 
       const authorized = await authorizeChatAgent(request, env, planId);
-      if (authorized instanceof Response) return authorized;
+      // 拒否にも CORS ヘッダを付ける。付けないとブラウザが応答そのものを隠すため、
+      // クライアントは 401（＝トークンの取り直しが必要）を認識できず fetch 例外だけが残る。
+      if (authorized instanceof Response) return withCors(authorized, corsHeaders);
       request = authorized;
     }
-    return (await routeAgentRequest(request, env, { cors: true })) ?? app.fetch(request, env, ctx);
+    return (
+      (await routeAgentRequest(request, env, { cors: corsHeaders })) ?? app.fetch(request, env, ctx)
+    );
   },
 } satisfies ExportedHandler<Bindings>;

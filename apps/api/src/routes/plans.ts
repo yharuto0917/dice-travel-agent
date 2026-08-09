@@ -10,7 +10,7 @@ import {
   type PlanVersionMeta,
   RestorePlanRequestSchema,
 } from "@repo/shared";
-import { and, desc, eq, lt, or } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, or } from "drizzle-orm";
 import { type Context, Hono } from "hono";
 import { setCookie } from "hono/cookie";
 import { PlanRevisionConflictError, persistPlanRevision } from "../agents/chat/plan-persistence";
@@ -321,17 +321,23 @@ plansRoute.get("/:id/chat", zValidator("query", ChatHistoryQuerySchema), async (
   const row = await loadOwnedPlan(db, id, c.get("clientId"));
   if (!row) return c.json({ error: "plan not found" }, 404);
 
-  const { limit, before, beforeMessageId } = c.req.valid("query");
+  const { limit, before, beforeMessageIds } = c.req.valid("query");
   let cursor = decodeCursor(before);
 
-  // 初回は DO が現在保持している最古の live message より前から始める。
+  // 初回は DO が保持している live message より前から始める。
   // D1 の最新ページを一度返して client 側で全件重複除外する形だと、可視行が増えないまま
   // cursor だけ進み、上端検知が再発火せず過去へ到達できない。
-  if (!cursor && beforeMessageId) {
+  //
+  // 候補を複数受け取るのは、live message が必ず D1 に居るとは限らないため（中断された
+  // assistant 発話や計画未完成時の user 発話はアーカイブされない）。存在する行のうち
+  // **最も古いもの**を境界に採る。1件も解決できないときは cursor 無し＝最新ページに倒す。
+  if (!cursor && beforeMessageIds.length > 0) {
     const [boundary] = await db
       .select({ createdAt: chatMessages.createdAt, id: chatMessages.id })
       .from(chatMessages)
-      .where(and(eq(chatMessages.planId, id), eq(chatMessages.id, beforeMessageId)));
+      .where(and(eq(chatMessages.planId, id), inArray(chatMessages.id, beforeMessageIds)))
+      .orderBy(asc(chatMessages.createdAt), asc(chatMessages.id))
+      .limit(1);
     if (boundary) cursor = boundary;
   }
 

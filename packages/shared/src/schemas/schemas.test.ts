@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { AgentStateSchema, PendingPlanEditSchema, TravelChatStateSchema } from "./agent";
 import {
+  CHAT_HISTORY_MAX_BOUNDARY_IDS,
   CHAT_HISTORY_MAX_LIMIT,
   ChatDataPartSchema,
   ChatHistoryQuerySchema,
@@ -200,11 +201,19 @@ describe("ChatHistoryQuerySchema", () => {
     expect(ChatHistoryQuerySchema.parse({ limit: "35" }).limit).toBe(35);
   });
 
-  it("最古の live message id を初回境界として受理する", () => {
-    expect(ChatHistoryQuerySchema.parse({ beforeMessageId: "message-1" }).beforeMessageId).toBe(
-      "message-1",
-    );
-    expect(() => ChatHistoryQuerySchema.parse({ beforeMessageId: "" })).toThrow();
+  it("初回境界の候補はカンマ区切りで受け取り、空要素を落とす", () => {
+    expect(
+      ChatHistoryQuerySchema.parse({ beforeMessageIds: "m1,m2 , ,m3" }).beforeMessageIds,
+    ).toEqual(["m1", "m2", "m3"]);
+    expect(ChatHistoryQuerySchema.parse({}).beforeMessageIds).toEqual([]);
+    expect(ChatHistoryQuerySchema.parse({ beforeMessageIds: "" }).beforeMessageIds).toEqual([]);
+  });
+
+  it("境界候補は上限件数までしか受け取らない（URL 肥大を防ぐ）", () => {
+    const ids = Array.from({ length: CHAT_HISTORY_MAX_BOUNDARY_IDS + 5 }, (_, i) => `m${i}`);
+    expect(
+      ChatHistoryQuerySchema.parse({ beforeMessageIds: ids.join(",") }).beforeMessageIds,
+    ).toHaveLength(CHAT_HISTORY_MAX_BOUNDARY_IDS);
   });
 
   it("limit の上限を超える値は拒否する", () => {

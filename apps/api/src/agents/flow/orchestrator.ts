@@ -97,8 +97,15 @@ function clampText(s: string | undefined, max: number): string | undefined {
 /**
  * 生成された PlanDay の文字列フィールドを安全長に切り詰める。LLM の退行で混入した
  * 巨大な run-on 文字列がそのまま title/description に残るのを防ぐ防御層。
+ *
+ * 保存スキーマでは後方互換のため description が optional。生成経路ではサニタイズ後にも
+ * 生成用スキーマを再検証し、空白→undefined へ落ちた item を保存させない。
+ *
+ * 検証を通らなかった場合は**例外ではなく null** を返す。ここは `runDay` の非同期処理の
+ * 途中（try/catch の外）から呼ばれるため、投げると 1 item の description が空白だっただけで
+ * その日の生成が丸ごと落ちる。呼び出し側で別経路へ切り替えられるよう戻り値で返す。
  */
-function sanitizeDay(day: PlanDay): PlanDay {
+function sanitizeDay(day: PlanDay): PlanDay | null {
   const sanitized = {
     ...day,
     title: clampText(day.title, MAX_TITLE_LEN),
@@ -108,9 +115,8 @@ function sanitizeDay(day: PlanDay): PlanDay {
       description: clampText(item.description, MAX_DESC_LEN),
     })),
   };
-  // 保存スキーマでは後方互換のため description が optional。生成経路ではサニタイズ後にも
-  // 生成用スキーマを再検証し、空白→undefined へ落ちた item を保存させない。
-  return PlanDayGenSchema.parse(sanitized) as PlanDay;
+  const result = PlanDayGenSchema.safeParse(sanitized);
+  return result.success ? (result.data as PlanDay) : null;
 }
 
 /** 画像を生成する対象の種別。観光名所（観光スポット `spot`）のみに限定する（#18）。 */
@@ -370,24 +376,22 @@ export async function runDay(
   // finalizedDay はクロージャ内でのみ代入されるため TS は初期値 null から型を広げられない。
   // キャストで宣言型に戻してから items の有無で絞り込む。
   const finalized = finalizedDay as PlanDay | null;
+  // finalizeDay 由来の日はサニタイズ・再検証を通ったものだけ採用する。落ちた場合（description が
+  // 空白だけ、など）は null になり、下の構造化経路へ回る。
+  const sanitizedFinalized =
+    finalized && finalized.items.length > 0 ? sanitizeDay({ ...finalized, dayNumber: n }) : null;
+
   let day: PlanDay;
-  if (finalized && finalized.items.length > 0) {
-    day = sanitizeDay({ ...finalized, dayNumber: n });
+  if (sanitizedFinalized) {
+    day = sanitizedFinalized;
   } else {
-    // 構造化: finalizeDay 未到達／空でも、ストリーム中に集めたツール結果・最終テキストと
+    // 構造化: finalizeDay 未到達／空／検証落ちでも、ストリーム中に集めたツール結果・最終テキストと
     // 目的地コンテキストを根拠に当日の itinerary を必ず組み立てる。ツールデータが乏しくても
     // モデルの知識で実在の有名スポット/飲食店を補い、items を空にしない。
     onActivity?.("日程をまとめています…", "");
     const structured = await structureDay(env, ctx, plan, n, finalText, toolNotes);
-    if (structured && structured.items.length > 0) {
-      day = structured;
-    } else if (finalized) {
-      // 最終フォールバック: 構造化できなくても finalizeDay があればそれを採用する。
-      day = sanitizeDay({ ...finalized, dayNumber: n });
-    } else {
-      // 決定的な最小日（空 items）を返す（呼び出し側 checker/fix が後段で補う）。
-      day = structured ?? { dayNumber: n, title: `${n}日目`, items: [] };
-    }
+    // 決定的な最小日（空 items）は最後の砦（呼び出し側 checker/fix が後段で補う）。
+    day = structured?.items.length ? structured : { dayNumber: n, title: `${n}日目`, items: [] };
   }
 
   // 各アイテムへ内容一致の風景画像を決定的に生成・埋め込む（各日2枚以上, #18）。

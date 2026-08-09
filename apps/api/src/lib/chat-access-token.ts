@@ -10,8 +10,17 @@
 import { parse, parseSigned } from "hono/utils/cookie";
 import { CLIENT_ID_COOKIE } from "../middleware/client-id";
 
-/** 常駐チャット Agent のルーティング接頭辞。 */
+/** 常駐チャット Agent のルーティング接頭辞（Cookie の path など、URL を組み立てる用途）。 */
 export const CHAT_AGENT_PREFIX = "/agents/travel-chat-agent/";
+
+/** Agents SDK のルーティング接頭辞（`routeAgentRequest` の既定）。 */
+const AGENT_ROUTE_PREFIX = "agents";
+
+/** `camelCaseToKebabCase("TravelChatAgent")` と一致する namespace。 */
+const CHAT_AGENT_NAMESPACE = "travel-chat-agent";
+
+/** 実際に発行される planId は UUID。Cookie 名・DO 名へ安全に埋め込める文字だけを許可する。 */
+const PLAN_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 /** 検証済みの失効時刻を Agent へだけ渡す内部ヘッダ。外部入力は認可ゲートで上書きする。 */
 export const CHAT_ACCESS_EXPIRES_HEADER = "x-tabidice-chat-access-exp";
@@ -41,10 +50,38 @@ export function isChatAccessExpired(expiresAt: number, now: number = Date.now())
 
 /** 実際に発行される planId は UUID。Cookie 名へ安全に埋め込める文字だけを許可する。 */
 export function chatAccessCookieName(planId: string): string {
-  if (!/^[A-Za-z0-9_-]{1,128}$/.test(planId)) {
+  if (!PLAN_ID_PATTERN.test(planId)) {
     throw new Error("invalid planId for chat access cookie");
   }
   return `${CHAT_ACCESS_COOKIE_PREFIX}${planId}`;
+}
+
+/**
+ * Chat Agent 宛のリクエストなら planId を返す（違えば null）。
+ *
+ * **接頭辞の前方一致で判定してはいけない。** 実際に DO へ振り分ける partyserver は
+ * `pathname.split("/").filter(Boolean)` でセグメントを取るため、空セグメントは捨てられる。
+ * `startsWith("/agents/travel-chat-agent/")` で見ると `/agents//travel-chat-agent/{planId}` や
+ * `//agents/travel-chat-agent/{planId}` が判定から漏れる一方、ルーティングは通常どおり成立し、
+ * 認可ゲートだけを迂回して `AIChatAgent` の `/get-messages`（会話全文を返す HTTP エンドポイント）に
+ * 到達できてしまう。ここでは振り分け側とまったく同じ分解規則で判定する。
+ *
+ * planId は decode せず生のセグメントで照合する。DO 名（`routePartykitRequest` が
+ * `idFromName` に渡す値）も生のセグメントなので、decode すると照合対象がずれる。
+ * percent-encoding を含む planId は許可文字の検査で弾かれる（decode 例外も起きない）。
+ */
+export function chatAgentPlanIdFromPath(pathname: string): string | null {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] !== AGENT_ROUTE_PREFIX || parts[1] !== CHAT_AGENT_NAMESPACE) return null;
+  const planId = parts[2];
+  if (!planId || !PLAN_ID_PATTERN.test(planId)) return null;
+  return planId;
+}
+
+/** Chat Agent 宛（planId の妥当性は問わない）かどうか。不正な planId を 404 で返し分けるのに使う。 */
+export function isChatAgentPath(pathname: string): boolean {
+  const parts = pathname.split("/").filter(Boolean);
+  return parts[0] === AGENT_ROUTE_PREFIX && parts[1] === CHAT_AGENT_NAMESPACE;
 }
 
 /** Cookie を Chat Agent の当該 planId パスだけへ送る。 */

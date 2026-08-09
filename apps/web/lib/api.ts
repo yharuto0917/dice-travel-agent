@@ -171,15 +171,20 @@ export function getRateLimits(): Promise<RateLimitsResponse> {
  * ライブ会話は Chat Agent が持つため、ここは「Agent の保持上限より古い履歴」を
  * さかのぼるための読み出し。`before` に前回の `nextCursor` を渡して1ページずつ遡る。
  * メッセージ送信は Chat Agent（`useAgentChat`）が担うので HTTP の送信APIは無い。
+ *
+ * `beforeMessageIds` は初回ページの境界候補（live message の id を古い順）。live message は
+ * 必ずしも D1 に居ないため、1件ではなく候補列を渡してサーバに解決させる。
  */
 export function getChatMessages(
   id: string,
-  options?: { limit?: number; before?: string; beforeMessageId?: string },
+  options?: { limit?: number; before?: string; beforeMessageIds?: string[] },
 ): Promise<ChatHistoryResponse> {
   const params = new URLSearchParams();
   if (options?.limit) params.set("limit", String(options.limit));
   if (options?.before) params.set("before", options.before);
-  if (options?.beforeMessageId) params.set("beforeMessageId", options.beforeMessageId);
+  if (options?.beforeMessageIds?.length) {
+    params.set("beforeMessageIds", options.beforeMessageIds.join(","));
+  }
   const query = params.size > 0 ? `?${params.toString()}` : "";
   return apiJson<ChatHistoryResponse>(`/plans/${id}/chat${query}`);
 }

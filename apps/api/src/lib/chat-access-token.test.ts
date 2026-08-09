@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   CHAT_ACCESS_TTL_SEC,
   chatAccessCookieName,
+  chatAgentPlanIdFromPath,
   isChatAccessExpired,
+  isChatAgentPath,
   signChatAccessToken,
   verifyChatAccessRequest,
   verifyChatAccessToken,
@@ -19,6 +21,42 @@ const sign = (overrides: { planId?: string; clientId?: string } = {}) =>
     { planId: overrides.planId ?? "plan-1", clientId: overrides.clientId ?? "client-1" },
     NOW,
   );
+
+describe("chatAgentPlanIdFromPath", () => {
+  it("Chat Agent 宛の経路から planId を取り出す", () => {
+    expect(chatAgentPlanIdFromPath("/agents/travel-chat-agent/plan-1")).toBe("plan-1");
+    expect(chatAgentPlanIdFromPath("/agents/travel-chat-agent/plan-1/get-messages")).toBe("plan-1");
+  });
+
+  it("空セグメントを挟んだ経路でも同じ planId を返す（認可ゲートの迂回を防ぐ）", () => {
+    // 振り分け側の partyserver は `split("/").filter(Boolean)` でセグメントを取るため、
+    // これらはすべて同じ DO へ到達する。前方一致で判定するとゲートだけが外れる。
+    expect(chatAgentPlanIdFromPath("/agents//travel-chat-agent/plan-1/get-messages")).toBe(
+      "plan-1",
+    );
+    expect(chatAgentPlanIdFromPath("//agents/travel-chat-agent/plan-1/get-messages")).toBe(
+      "plan-1",
+    );
+    expect(chatAgentPlanIdFromPath("/agents/travel-chat-agent//plan-1")).toBe("plan-1");
+    expect(isChatAgentPath("/agents//travel-chat-agent/plan-1")).toBe(true);
+  });
+
+  it("別 Agent・接頭辞違い・planId 欠落は対象外", () => {
+    expect(chatAgentPlanIdFromPath("/agents/travel-planning-agent/plan-1")).toBeNull();
+    expect(chatAgentPlanIdFromPath("/agents/travel-chat-agent")).toBeNull();
+    expect(chatAgentPlanIdFromPath("/plans/plan-1/chat")).toBeNull();
+    expect(isChatAgentPath("/agents/travel-planning-agent/plan-1")).toBe(false);
+  });
+
+  it("planId の形が不正なら null（decode 例外も起こさない）", () => {
+    // 旧実装は decodeURIComponent で URIError を投げ、未捕捉のまま 500 になっていた。
+    expect(chatAgentPlanIdFromPath("/agents/travel-chat-agent/%E0%A4%A/get-messages")).toBeNull();
+    expect(chatAgentPlanIdFromPath("/agents/travel-chat-agent/plan.1")).toBeNull();
+    expect(chatAgentPlanIdFromPath(`/agents/travel-chat-agent/${"a".repeat(129)}`)).toBeNull();
+    // 経路としては Chat Agent 宛なので、呼び出し側は 404 を返して DO へ渡さない。
+    expect(isChatAgentPath("/agents/travel-chat-agent/%E0%A4%A")).toBe(true);
+  });
+});
 
 describe("chat-access-token", () => {
   it("接続期限より前だけ有効とみなす", () => {

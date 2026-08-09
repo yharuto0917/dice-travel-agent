@@ -16,8 +16,12 @@ export interface ConversationProps {
    * 「増えたら追従したい値」を渡す。
    */
   autoScrollKey?: string | number;
-  /** 上端に達したときに呼ばれる（過去ログの追加読み込み）。 */
-  onReachTop?: () => void;
+  /**
+   * 上端に達したときに呼ばれる（過去ログの追加読み込み）。
+   * 実際に読み込みを開始したときだけ true を返すこと。false のときはスクロール位置を
+   * 記録しない（記録すると、次の追従で「前方挿入」と誤判定して位置がずれる）。
+   */
+  onReachTop?: () => boolean | void;
   className?: string;
 }
 
@@ -44,10 +48,13 @@ export function Conversation({
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
     const el = event.currentTarget;
     stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight <= BOTTOM_THRESHOLD;
-    if (el.scrollTop <= TOP_THRESHOLD && onReachTop) {
-      prevScrollHeightRef.current = el.scrollHeight;
-      onReachTop();
-    }
+    if (el.scrollTop > TOP_THRESHOLD || !onReachTop) return;
+
+    // 読み込みが実際に始まったときだけ高さを覚える。読み込み中・打ち止めで no-op だった場合に
+    // 記録すると、次の autoScrollKey 更新でストリーミングの伸長分を「前方挿入」と誤判定し、
+    // 末尾追従の代わりにスクロール位置がずれる。
+    const started = onReachTop();
+    if (started !== false) prevScrollHeightRef.current = el.scrollHeight;
   };
 
   // 新着で末尾へ追従する（最下部にいるときだけ）。描画確定後に測るため layout effect。
@@ -62,10 +69,12 @@ export function Conversation({
     lastScrollKeyRef.current = autoScrollKey;
 
     // 過去ログが前方に挿入された場合は、増えた高さ分だけ位置をずらして見た目を保つ。
+    // 記録は1回の追従で必ず使い切る。持ち越すと、その後のストリーミングによる伸長まで
+    // 前方挿入と誤判定して位置がずれる。
     const prevHeight = prevScrollHeightRef.current;
+    prevScrollHeightRef.current = null;
     if (prevHeight !== null && el.scrollHeight > prevHeight) {
       el.scrollTop += el.scrollHeight - prevHeight;
-      prevScrollHeightRef.current = null;
       return;
     }
 

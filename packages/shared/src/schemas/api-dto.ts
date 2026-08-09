@@ -195,11 +195,19 @@ export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export const CHAT_HISTORY_DEFAULT_LIMIT = 20;
 export const CHAT_HISTORY_MAX_LIMIT = 50;
 
+/** 初回ページの境界解決に送れる live message id の上限。URL 長を抑えるための頭打ち。 */
+export const CHAT_HISTORY_MAX_BOUNDARY_IDS = 20;
+
 /**
  * チャット履歴取得のクエリ（GET /plans/:id/chat, #20）。
  * `before` は前ページの `nextCursor` をそのまま渡す opaque cursor。
- * 初回の `beforeMessageId` は DO が保持する最古の live message id。サーバが D1 上の
- * 保存時刻とidを解決し、その直前から返す。
+ *
+ * 初回の `beforeMessageIds` は DO が保持する live message の id を**古い順**に並べた
+ * カンマ区切り。サーバは D1 に存在する最初の1件を境界として解決し、その直前から返す。
+ * 単一の id ではなく列にするのは、live message が必ずしも D1 に居るとは限らないため
+ * （中断された assistant 発話や、計画未完成時の user 発話はアーカイブされない）。
+ * 解決できない id を境界にすると最新ページを返してしまい、client 側の重複除外で
+ * 可視行が増えないまま cursor だけ進み、過去へ到達できなくなる。
  */
 export const ChatHistoryQuerySchema = z.object({
   limit: z.coerce
@@ -209,7 +217,16 @@ export const ChatHistoryQuerySchema = z.object({
     .max(CHAT_HISTORY_MAX_LIMIT)
     .default(CHAT_HISTORY_DEFAULT_LIMIT),
   before: z.string().optional(),
-  beforeMessageId: z.string().min(1).optional(),
+  beforeMessageIds: z
+    .string()
+    .optional()
+    .transform((value) =>
+      (value ?? "")
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean)
+        .slice(0, CHAT_HISTORY_MAX_BOUNDARY_IDS),
+    ),
 });
 export type ChatHistoryQuery = z.infer<typeof ChatHistoryQuerySchema>;
 

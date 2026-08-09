@@ -8,7 +8,8 @@ import { plans } from "./db/schema";
 import type { AppEnv, Bindings } from "./env";
 import {
   CHAT_ACCESS_EXPIRES_HEADER,
-  CHAT_AGENT_PREFIX,
+  chatAgentPlanIdFromPath,
+  isChatAgentPath,
   verifyChatAccessRequest,
 } from "./lib/chat-access-token";
 import { peekRateLimit } from "./lib/rate-limit";
@@ -100,15 +101,11 @@ export type AppType = typeof app;
  *
  * 認可を通った場合は検証済みの失効時刻を内部ヘッダへ載せた Request を返す。
  */
-async function authorizeChatAgent(request: Request, env: Bindings): Promise<Request | Response> {
-  const url = new URL(request.url);
-  const planId = decodeURIComponent(
-    url.pathname.slice(CHAT_AGENT_PREFIX.length).split("/")[0] ?? "",
-  );
-  if (!planId || !/^[A-Za-z0-9_-]{1,128}$/.test(planId)) {
-    return new Response("plan not found", { status: 404 });
-  }
-
+async function authorizeChatAgent(
+  request: Request,
+  env: Bindings,
+  planId: string,
+): Promise<Request | Response> {
   const result = await verifyChatAccessRequest(
     request,
     { chatAccess: env.CHAT_ACCESS_SECRET, cookie: env.COOKIE_SECRET },
@@ -140,11 +137,20 @@ async function authorizeChatAgent(request: Request, env: Bindings): Promise<Requ
  * `setState` でブロードキャストされる AgentState を購読する。
  * 常駐チャット（`/agents/travel-chat-agent/{planId}`）だけは接続前に
  * chat access token の認可ゲートを通す。計画生成 Agent 側の認可強化は #23 で扱う。
+ *
+ * 経路判定は接頭辞の前方一致ではなく、振り分け側（partyserver）と同じセグメント分解で行う
+ * （{@link chatAgentPlanIdFromPath} 参照）。前方一致だと `/agents//travel-chat-agent/...` が
+ * ゲートを素通りしたまま DO へ到達する。
  */
 export default {
   async fetch(request: Request, env: Bindings, ctx: ExecutionContext): Promise<Response> {
-    if (new URL(request.url).pathname.startsWith(CHAT_AGENT_PREFIX)) {
-      const authorized = await authorizeChatAgent(request, env);
+    const pathname = new URL(request.url).pathname;
+    if (isChatAgentPath(pathname)) {
+      const planId = chatAgentPlanIdFromPath(pathname);
+      // planId の形が不正なら DO へ渡さず終わらせる（存在有無も明かさない）。
+      if (!planId) return new Response("plan not found", { status: 404 });
+
+      const authorized = await authorizeChatAgent(request, env, planId);
       if (authorized instanceof Response) return authorized;
       request = authorized;
     }

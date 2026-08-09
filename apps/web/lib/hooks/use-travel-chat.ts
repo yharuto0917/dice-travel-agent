@@ -2,6 +2,7 @@
 
 import { useAgentChat } from "@cloudflare/ai-chat/react";
 import {
+  CHAT_HISTORY_MAX_BOUNDARY_IDS,
   ChatDataPartSchema,
   type ChatMessage,
   type RateLimitStatus,
@@ -60,8 +61,22 @@ export interface UseTravelChatResult {
   archive: ChatMessage[];
   /** さらに古い履歴があるか。 */
   hasMoreArchive: boolean;
-  /** 古い履歴を1ページ読み足す。 */
-  loadOlder: () => void;
+  /**
+   * 古い履歴を1ページ読み足す。実際に読み込みを開始したときだけ true。
+   * 呼び出し側（`Conversation`）はこの戻り値でスクロール位置の保存要否を決める。
+   */
+  loadOlder: () => boolean;
+}
+
+/**
+ * 初回ページの境界候補（live message の id を古い順）。
+ *
+ * 最古の1件だけでは、それが D1 にアーカイブされていない場合（中断された assistant 発話・
+ * 計画未完成時の user 発話）にサーバが境界を解決できず、最新ページが返ってしまう。
+ * 候補を複数渡し、D1 に実在する最も古い1件をサーバに選ばせる。
+ */
+function boundaryIds(messages: UIMessage[]): string[] {
+  return messages.slice(0, CHAT_HISTORY_MAX_BOUNDARY_IDS).map((message) => message.id);
 }
 
 /**
@@ -123,14 +138,14 @@ export function useTravelChat({
   }, [status]);
 
   const loadArchivePage = useCallback(
-    async (before?: string, beforeMessageId?: string) => {
+    async (before?: string, beforeIds?: string[]) => {
       if (loadingArchiveRef.current) return;
       loadingArchiveRef.current = true;
       try {
         const page = await getChatMessages(planId, {
           limit: ARCHIVE_PAGE_SIZE,
           before,
-          beforeMessageId,
+          beforeMessageIds: beforeIds,
         });
         setArchive((prev) => {
           const known = new Set(prev.map((message) => message.id));
@@ -185,12 +200,16 @@ export function useTravelChat({
     [sendMessage],
   );
 
-  const loadOlder = useCallback(() => {
+  const loadOlder = useCallback((): boolean => {
+    if (loadingArchiveRef.current) return false;
     if (!archiveLoadedRef.current) {
-      void loadArchivePage(undefined, messages[0]?.id);
-      return;
+      if (messages.length === 0) return false;
+      void loadArchivePage(undefined, boundaryIds(messages));
+      return true;
     }
-    if (nextCursor) void loadArchivePage(nextCursor);
+    if (!nextCursor) return false;
+    void loadArchivePage(nextCursor);
+    return true;
   }, [loadArchivePage, messages, nextCursor]);
 
   // DO の履歴同期が完了したら、最古の live message より前を初回ページとして先読みする。
@@ -206,7 +225,7 @@ export function useTravelChat({
     ) {
       return;
     }
-    void loadArchivePage(undefined, messages[0]?.id);
+    void loadArchivePage(undefined, boundaryIds(messages));
   }, [loadArchivePage, messages, status]);
 
   /**

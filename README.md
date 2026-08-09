@@ -76,6 +76,8 @@ TabiDice は、Cloudflare のエッジコンピューティング環境（Cloudf
 * **Home の作成履歴・URL 直開きの場合**: 所有者確認 → Turnstile 検証を通してから `POST /plans/:id/chat-access` でトークンを発行します。
 * トークンは `planId` / `clientId` / 有効期限を署名対象に含むため、他の計画へ流用したり、別のクライアントが使い回すことはできません。
 
+認可ゲートの経路判定は、実際に Durable Object へ振り分ける partyserver とまったく同じ規則 (`pathname.split("/").filter(Boolean)`) で行います。接頭辞の前方一致で判定すると `/agents//travel-chat-agent/{planId}` のように空セグメントを挟んだ URL がゲートだけを迂回し、`AIChatAgent` の `/get-messages`（会話全文を返す HTTP エンドポイント）へ到達できてしまうためです。
+
 トークンの署名鍵は `CHAT_ACCESS_SECRET` です。ローカル開発では `apps/api/.dev.vars` に、本番では `wrangler secret put CHAT_ACCESS_SECRET` で設定してください（未設定の場合、計画生成とチャット接続が失敗します）。Turnstile 側はローカルでは公式テストサイトキー／`TURNSTILE_SECRET_KEY` 未設定時の検証バイパスがそのまま働きます。
 
 ### Durable Object のマイグレーション
@@ -86,6 +88,18 @@ pnpm --filter @repo/api db:generate      # スキーマ変更からマイグレ�
 pnpm --filter @repo/api db:migrate:local # ローカル D1 へ適用
 pnpm --filter @repo/api db:migrate       # 本番 D1 へ適用
 ```
+
+> **`0004_nice_scorpion.sql` を本番へ適用する前に**、`plan_versions` に重複した
+> `(plan_id, version)` 行が無いことを確認してください。この migration は
+> `UNIQUE INDEX` を張るため、重複が1件でもあると適用が失敗します。旧実装の版更新は
+> CAS を伴わず、並行した確定処理で重複を作りうる状態でした。
+>
+> ```bash
+> pnpm --filter @repo/api exec wrangler d1 execute DB --remote \
+>   --command "SELECT plan_id, version, COUNT(*) AS n FROM plan_versions GROUP BY 1, 2 HAVING n > 1"
+> ```
+>
+> 0件なら、そのまま適用できます。
 
 ---
 

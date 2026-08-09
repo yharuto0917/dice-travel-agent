@@ -78,7 +78,7 @@ TabiDice は、Cloudflare のエッジコンピューティング環境（Cloudf
 
 認可ゲートの経路判定は、実際に Durable Object へ振り分ける partyserver とまったく同じ規則 (`pathname.split("/").filter(Boolean)`) で行います。接頭辞の前方一致で判定すると `/agents//travel-chat-agent/{planId}` のように空セグメントを挟んだ URL がゲートだけを迂回し、`AIChatAgent` の `/get-messages`（会話全文を返す HTTP エンドポイント）へ到達できてしまうためです。
 
-トークンの署名鍵は `CHAT_ACCESS_SECRET` です。ローカル開発では `apps/api/.dev.vars` に、本番では `wrangler secret put CHAT_ACCESS_SECRET` で設定してください（未設定の場合、計画生成とチャット接続が失敗します）。Turnstile 側はローカルでは公式テストサイトキー／`TURNSTILE_SECRET_KEY` 未設定時の検証バイパスがそのまま働きます。
+トークンの署名鍵は `CHAT_ACCESS_SECRET` です。ローカル開発では `apps/api/.dev.vars` に設定してください。本番は GitHub Secrets に `CHAT_ACCESS_SECRET` を登録すると、デプロイワークフロー（`.github/workflows/deploy.yml`）が他のランタイム Secrets と一緒に Worker へ同期します。**GitHub Secrets 側が未登録のままだと `POST /plans`（計画生成）と `POST /plans/:id/chat-access` が 500 で失敗する**ため、デプロイは同期前に未設定を検知して失敗するようにしています。Turnstile 側はローカルでは公式テストサイトキー／`TURNSTILE_SECRET_KEY` 未設定時の検証バイパスがそのまま働きます。
 
 ### Durable Object のマイグレーション
 常駐チャット用に `TravelChatAgent` (SQLite-backed Durable Object) を追加しています（`apps/api/wrangler.json` の migration tag `v2`）。D1 側のスキーマ変更はマイグレーションファイルで管理し、`drizzle-kit push` は使用しません。

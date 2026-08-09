@@ -114,6 +114,9 @@ export function useTravelChat({
 
   const chat = useAgentChat<TravelChatState>({
     agent,
+    // 履歴の初回取得（`/get-messages`）は WebSocket と違い通常の fetch で飛ぶ。API は別オリジンの
+    // ため、既定の "same-origin" では接続許可 Cookie が送られず認可ゲートに 401 で弾かれる。
+    credentials: "include",
     // 切断・再接続でも生成中の応答を取りこぼさない。
     resume: true,
     onData: (part) => {

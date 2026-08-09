@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TravelPlanDraftSchema } from "./plan";
+import { PlanDiffSchema, TravelPlanDraftSchema, TravelPlanSchema } from "./plan";
 
 /** AI Agent の進行フェーズ（決まったフローの段階） */
 export const AgentPhaseSchema = z.enum([
@@ -99,3 +99,49 @@ export const AgentStateSchema = z.object({
   awaitingSince: z.string().nullable().default(null),
 });
 export type AgentState = z.infer<typeof AgentStateSchema>;
+
+/**
+ * 常駐チャット（#20）の発話意図。
+ * - edit: 計画の修正指示（編集ループへ）
+ * - question: 旅程・現地情報への質問（QAループへ）
+ * - other: 旅行と無関係。LLM のツールループを回さず短い誘導文で返す
+ */
+export const ChatIntentSchema = z.enum(["edit", "question", "other"]);
+export type ChatIntent = z.infer<typeof ChatIntentSchema>;
+
+/**
+ * チャット由来の計画修正提案（承認待ち, #20）。
+ *
+ * `proposedPlan` は下書き（partial）ではなく完成スキーマ `TravelPlanSchema` を要求する。
+ * 未承認の提案が承認された瞬間に D1 の現行計画を置き換えるため、ここで完成形を
+ * 強制しないと欠落したまま保存され、しおり表示が壊れる。
+ */
+export const PendingPlanEditSchema = z.object({
+  id: z.string(),
+  /** 何をどう変えるかの日本語説明（チャットと差分プレビューの見出しに使う）。 */
+  summary: z.string(),
+  proposedPlan: TravelPlanSchema,
+  /** 現行版との構造化差分（プレビュー表示用）。 */
+  diff: PlanDiffSchema,
+  /** 提案のために新規生成した R2 object。却下・上書き時の後始末に使う。 */
+  generatedImageKeys: z.array(z.string()).default([]),
+  createdAt: z.string(),
+});
+export type PendingPlanEdit = z.infer<typeof PendingPlanEditSchema>;
+
+/**
+ * 常駐チャット Agent の同期状態（#20）。
+ *
+ * 会話そのものは AIChatAgent が SQLite へ永続化するため state には載せない。
+ * ここに置くのは「全接続クライアントへ即時配信したい計画修正のライフサイクル」だけに絞る。
+ */
+export const TravelChatStateSchema = z.object({
+  /** 承認待ちの修正提案。承認・却下で null に戻る。 */
+  pendingEdit: PendingPlanEditSchema.nullable().default(null),
+  /**
+   * 直近で適用に成功した計画バージョン。しおりUIはこの値の変化を検知して
+   * D1 から計画を再取得する（DO state を描画の真実にしない）。
+   */
+  appliedVersion: z.number().int().min(1).nullable().default(null),
+});
+export type TravelChatState = z.infer<typeof TravelChatStateSchema>;

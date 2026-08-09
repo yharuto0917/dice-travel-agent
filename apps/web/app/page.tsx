@@ -1,9 +1,10 @@
 import { ArrowRight, Compass, DiceFive, MapPinLine } from "@phosphor-icons/react/dist/ssr";
 import { cookies } from "next/headers";
 import Link from "next/link";
+import { HistoryPlanLink } from "@/components/chat/history-plan-link";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardBody } from "@/components/ui/card";
-import { formatHistoryDate, HISTORY_COOKIE_NAME, parseHistory } from "@/lib/history";
+import { HISTORY_COOKIE_NAME, parseHistory } from "@/lib/history";
 
 // cookies() の参照により当ルートは動的レンダリングになり、Home へ戻る度に最新の
 // 作成履歴 Cookie を反映する。
@@ -53,22 +54,11 @@ export default async function Home() {
           <ol className="mt-3 grid gap-2.5">
             {history.map((entry) => (
               <li key={entry.id}>
-                <Link href={`/itinerary?planId=${entry.id}`} className="block">
-                  <Card className="transition hover:-translate-y-0.5 hover:shadow-toy-lg">
-                    <CardBody className="flex items-center gap-3 p-4">
-                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-surface-2 text-foreground">
-                        <Compass size={22} weight="duotone" />
-                      </span>
-                      <span className="min-w-0">
-                        <span className="block truncate text-sm font-bold">{entry.title}</span>
-                        <span className="block truncate text-xs text-muted">
-                          {formatHistoryDate(entry.createdAt)} に作成
-                        </span>
-                      </span>
-                      <ArrowRight size={18} weight="bold" className="ml-auto shrink-0 text-muted" />
-                    </CardBody>
-                  </Card>
-                </Link>
+                <HistoryPlanLink
+                  planId={entry.id}
+                  title={entry.title}
+                  createdAt={entry.createdAt}
+                />
               </li>
             ))}
           </ol>

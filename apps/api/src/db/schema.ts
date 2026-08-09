@@ -1,6 +1,13 @@
 import type { TravelPlanDraft, TripConditions } from "@repo/shared";
 import { sql } from "drizzle-orm";
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 const timestamp = (name: string) => text(name).notNull().default(sql`(CURRENT_TIMESTAMP)`);
 
@@ -48,7 +55,10 @@ export const planVersions = sqliteTable(
     label: text("label"),
     createdAt: timestamp("created_at"),
   },
-  (t) => [index("plan_versions_plan_id_idx").on(t.planId)],
+  (t) => [
+    index("plan_versions_plan_id_idx").on(t.planId),
+    uniqueIndex("plan_versions_plan_id_version_unique").on(t.planId, t.version),
+  ],
 );
 
 /**
@@ -79,7 +89,13 @@ export const chatMessages = sqliteTable(
     content: text("content").notNull(),
     createdAt: timestamp("created_at"),
   },
-  (t) => [index("chat_messages_plan_id_idx").on(t.planId)],
+  // 履歴は「この計画の新しい順」でページングする（#20）。planId だけの index では
+  // 並べ替えにソートが入るため、cursor の全順序キー（created_at, id）まで含めた
+  // 複合 index を張り、ページ取得を index スキャンだけで済ませる。
+  (t) => [
+    index("chat_messages_plan_id_idx").on(t.planId),
+    index("chat_messages_plan_created_id_idx").on(t.planId, t.createdAt, t.id),
+  ],
 );
 
 /** 生成・取得画像のメタ（R2キー・出典・帰属）（#18） */

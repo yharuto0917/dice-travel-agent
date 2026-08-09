@@ -1,6 +1,6 @@
 {
   "name": "@repo/api",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "private": true,
   "exports": {
     ".": "./src/index.ts"
@@ -19,6 +19,7 @@
   "type": "module",
   "dependencies": {
     "@ai-sdk/google": "^3.0.83",
+    "@cloudflare/ai-chat": "^0.8.6",
     "@hono/zod-validator": "^0.8.0",
     "@repo/shared": "workspace:*",
     "agents": "^0.16.2",

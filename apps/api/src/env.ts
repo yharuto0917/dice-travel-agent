@@ -12,6 +12,13 @@ export type Bindings = {
   BUCKET: R2Bucket;
   /** Workers AI バインディング */
   AI: Ai;
+  /** 計画生成 Agent（Durable Object, #13） */
+  TravelPlanningAgent: DurableObjectNamespace;
+  /**
+   * 常駐チャット Agent（Durable Object, #20）。
+   * `/agents/travel-chat-agent/{planId}` は Hono の認可ゲートを通してからこの binding へ転送する。
+   */
+  TravelChatAgent: DurableObjectNamespace;
   /** AI Gateway 経由で Gemini を呼ぶためのアカウントID / ゲートウェイ名（#14） */
   AI_GATEWAY_ACCOUNT_ID: string;
   AI_GATEWAY_NAME: string;
@@ -27,6 +34,11 @@ export type Bindings = {
    * プラン生成前の人間性検証（siteverify）に使う。未設定時はローカル開発として検証をバイパスする。
    */
   TURNSTILE_SECRET_KEY?: string;
+  /**
+   * 常駐チャットの接続許可トークン（chat access token）の署名鍵（secret 管理, #20）。
+   * Turnstile 検証と所有者確認を通した時だけ発行し、Chat Agent への接続時に検証する。
+   */
+  CHAT_ACCESS_SECRET: string;
   /** CORS 許可オリジン（フロント本番URL）。未設定時は開発用オリジンのみ許可（#6） */
   WEB_ORIGIN?: string;
   /**

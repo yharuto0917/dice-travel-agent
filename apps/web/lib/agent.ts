@@ -4,10 +4,13 @@
  * Agent は API Worker（apps/api）側の Durable Object として動作するため、
  * `useAgent` の `host` には API のオリジンを渡す必要がある（web とは別オリジン）。
  */
-import type { AgentPhase, PlanItemType, TimelineEventKind } from "@repo/shared";
+import type { AgentPhase, DiffChange, PlanItemType, TimelineEventKind } from "@repo/shared";
 
 /** Agent クラス名のケバブ表現（`/agents/travel-planning-agent/{planId}`）。 */
 export const TRAVEL_AGENT_NAME = "travel-planning-agent";
+
+/** 常駐チャット Agent のクラス名（`/agents/travel-chat-agent/{planId}`, #20）。 */
+export const TRAVEL_CHAT_AGENT_NAME = "travel-chat-agent";
 
 /**
  * Agent（= API Worker）へ接続するホスト。`lib/api.ts` の API ベースURLと揃える。
@@ -56,6 +59,22 @@ export const TIMELINE_KIND_ICON: Record<TimelineEventKind, string> = {
   thinking: "💭",
   hitl: "💬",
   status: "•",
+};
+
+/** 計画差分の変更種別の日本語ラベル（チャットの修正プレビュー用, #20）。 */
+export const DIFF_CHANGE_LABELS: Record<DiffChange, string> = {
+  added: "追加",
+  removed: "削除",
+  changed: "変更",
+  unchanged: "変更なし",
+};
+
+/** 差分の変更種別ごとの配色（ミニチュアパレットのトークンに合わせる, #20）。 */
+export const DIFF_CHANGE_CLASSES: Record<DiffChange, string> = {
+  added: "bg-primary/15 text-primary",
+  removed: "bg-red-500/15 text-red-500 line-through",
+  changed: "bg-accent/20 text-accent-foreground",
+  unchanged: "text-muted",
 };
 
 /** 旅程アイテム種別の日本語ラベル。 */

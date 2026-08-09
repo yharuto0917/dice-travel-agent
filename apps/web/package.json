@@ -1,6 +1,6 @@
 {
   "name": "@repo/web",
-  "version": "0.2.0",
+  "version": "0.5.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.210",
+    "@cloudflare/ai-chat": "^0.8.6",
     "@phosphor-icons/react": "^2.1.10",
     "@react-three/cannon": "^6.6.0",
     "@react-three/drei": "^10.7.7",

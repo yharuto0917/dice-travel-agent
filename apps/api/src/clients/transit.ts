@@ -10,8 +10,8 @@ import { ApiClientBase } from "./base";
 export class TransitClient extends ApiClientBase {
   private googleApiKey?: string;
 
-  constructor(config: { googleApiKey?: string; kv?: KVNamespace }) {
-    super(config.kv);
+  constructor(config: { googleApiKey?: string; kv?: KVNamespace; abortSignal?: AbortSignal }) {
+    super(config.kv, config.abortSignal);
     this.googleApiKey = config.googleApiKey;
   }
 

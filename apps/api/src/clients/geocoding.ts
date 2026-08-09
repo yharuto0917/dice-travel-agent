@@ -9,8 +9,8 @@ import { ApiClientBase } from "./base";
 export class GeocodingClient extends ApiClientBase {
   private apiKey?: string;
 
-  constructor(config: { apiKey?: string; kv?: KVNamespace }) {
-    super(config.kv);
+  constructor(config: { apiKey?: string; kv?: KVNamespace; abortSignal?: AbortSignal }) {
+    super(config.kv, config.abortSignal);
     this.apiKey = config.apiKey;
   }
 

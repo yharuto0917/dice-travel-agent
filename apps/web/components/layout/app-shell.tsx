@@ -14,7 +14,7 @@ type AppShellProps = {
 export function AppShell({ children, title, back, trailing }: AppShellProps) {
   return (
     <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-line/70 bg-background/80 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur">
+      <header className="sticky top-0 z-20 flex items-center gap-2 border-b border-line/70 bg-background/80 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur print:hidden">
         {back ? (
           <Link
             href={back.href}
@@ -28,7 +28,7 @@ export function AppShell({ children, title, back, trailing }: AppShellProps) {
         {trailing ? <div className="ml-auto">{trailing}</div> : null}
       </header>
 
-      <main className="flex flex-1 flex-col px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-5">
+      <main className="flex flex-1 flex-col px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-5 print:p-0">
         {children}
       </main>
     </div>

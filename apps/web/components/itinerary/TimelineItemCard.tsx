@@ -43,7 +43,7 @@ export function TimelineItemCard({ item }: TimelineItemCardProps) {
           {item.image?.url ? (
             <div className="mt-2 flex flex-col gap-1 relative w-fit max-w-full">
               <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-24 h-7 masking-tape z-10 rotate-[1deg]" />
-              <div className="overflow-hidden border-[8px] border-b-[24px] border-white shadow-sm bg-white aspect-[4/3] rotate-[-2deg] relative">
+              <div className="overflow-hidden border-[8px] border-b-[24px] border-white shadow-sm bg-white aspect-[4/3] rotate-[-2deg] relative print:border-slate-300">
                 <img
                   src={resolveAssetUrl(item.image.url)}
                   alt={item.title}
@@ -55,7 +55,7 @@ export function TimelineItemCard({ item }: TimelineItemCardProps) {
               {attribution ? (
                 <div className="text-[10px] text-muted text-right pr-1">
                   Photo by{" "}
-                  {attribution.url && attribution.url.startsWith("http") ? (
+                  {attribution.url?.startsWith("http") ? (
                     <a
                       href={attribution.url}
                       target="_blank"

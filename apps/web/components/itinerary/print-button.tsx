@@ -27,6 +27,8 @@ export function PrintButton({ targetRef, planTitle }: PrintButtonProps) {
   const fallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const originalTitleRef = useRef<string | null>(null);
+  const printTitleRef = useRef<string | null>(null);
+  const mountedRef = useRef(true);
 
   const resolvePrintRoot = useCallback(
     () => targetRef?.current ?? document.getElementById(PRINT_ROOT_ID) ?? document.body,
@@ -34,6 +36,7 @@ export function PrintButton({ targetRef, planTitle }: PrintButtonProps) {
   );
 
   const showNotice = useCallback((next: Notice) => {
+    if (!mountedRef.current) return;
     setNotice(next);
     if (noticeTimerRef.current !== null) {
       clearTimeout(noticeTimerRef.current);
@@ -44,26 +47,46 @@ export function PrintButton({ targetRef, planTitle }: PrintButtonProps) {
     }, NOTICE_TIMEOUT_MS);
   }, []);
 
+  const applyPrintDocumentTitle = useCallback(() => {
+    if (originalTitleRef.current === null) {
+      originalTitleRef.current = document.title;
+    }
+    const printTitle = toPrintDocumentTitle(planTitle);
+    printTitleRef.current = printTitle;
+    document.title = printTitle;
+  }, [planTitle]);
+
   const cleanupPrintState = useCallback(() => {
     if (fallbackTimerRef.current !== null) {
       clearTimeout(fallbackTimerRef.current);
       fallbackTimerRef.current = null;
     }
-    if (originalTitleRef.current !== null) {
+    if (
+      originalTitleRef.current !== null &&
+      printTitleRef.current !== null &&
+      document.title === printTitleRef.current
+    ) {
       document.title = originalTitleRef.current;
-      originalTitleRef.current = null;
     }
-    setState("idle");
+    originalTitleRef.current = null;
+    printTitleRef.current = null;
+    if (mountedRef.current) {
+      setState("idle");
+    }
   }, []);
 
-  // アンマウント後に注意書きのタイマーが残らないようにする。
+  // アンマウント後に印刷処理を続行せず、文書タイトルとタイマーを必ず元に戻す。
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
+      cleanupPrintState();
       if (noticeTimerRef.current !== null) {
         clearTimeout(noticeTimerRef.current);
+        noticeTimerRef.current = null;
       }
     };
-  }, []);
+  }, [cleanupPrintState]);
 
   /**
    * Cmd+P やブラウザメニューからの印刷はこのボタンを経由しないため、
@@ -76,8 +99,7 @@ export function PrintButton({ targetRef, planTitle }: PrintButtonProps) {
       markImagesEager(resolvePrintRoot());
       // ボタン経由なら handlePrint が退避済み。二重退避で元タイトルを失わないよう守る。
       if (originalTitleRef.current === null) {
-        originalTitleRef.current = document.title;
-        document.title = toPrintDocumentTitle(planTitle);
+        applyPrintDocumentTitle();
       }
     };
 
@@ -91,7 +113,7 @@ export function PrintButton({ targetRef, planTitle }: PrintButtonProps) {
       window.removeEventListener("beforeprint", handleBeforePrint);
       window.removeEventListener("afterprint", handleAfterPrint);
     };
-  }, [cleanupPrintState, resolvePrintRoot, planTitle]);
+  }, [applyPrintDocumentTitle, cleanupPrintState, resolvePrintRoot]);
 
   const handlePrint = async () => {
     if (state === "preparing") return;
@@ -104,6 +126,8 @@ export function PrintButton({ targetRef, planTitle }: PrintButtonProps) {
 
       // 画像とフォントの準備待ち。落ちた分は印刷を止めず、劣化する旨だけ知らせる。
       const result = await preparePrintAssets(root);
+      if (!mountedRef.current) return;
+
       if (result.failed > 0) {
         showNotice({
           kind: "warn",
@@ -114,10 +138,7 @@ export function PrintButton({ targetRef, planTitle }: PrintButtonProps) {
       }
 
       // document.title を退避・設定
-      if (originalTitleRef.current === null) {
-        originalTitleRef.current = document.title;
-      }
-      document.title = toPrintDocumentTitle(planTitle);
+      applyPrintDocumentTitle();
 
       // afterprint が鳴らなかった場合のセーフティタイマー (12秒)
       fallbackTimerRef.current = setTimeout(() => {
@@ -127,6 +148,7 @@ export function PrintButton({ targetRef, planTitle }: PrintButtonProps) {
       // 印刷ダイアログを起動
       window.print();
     } catch (e) {
+      if (!mountedRef.current) return;
       console.error("Print failed:", e);
       cleanupPrintState();
       showNotice({ kind: "error", message: "保存を開始できませんでした" });

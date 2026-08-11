@@ -54,11 +54,6 @@ export async function preparePrintAssets(
 
   // 画像デコードの待機処理
   const imagePromises = images.map(async (img): Promise<boolean> => {
-    // すでに完了していて正常画像の場合
-    if (img.complete && img.naturalWidth > 0) {
-      return true;
-    }
-
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
     const timeoutPromise = new Promise<boolean>((resolve) => {
@@ -69,10 +64,14 @@ export async function preparePrintAssets(
       try {
         if (typeof img.decode === "function") {
           await img.decode();
-          return true;
+          return img.naturalWidth > 0;
         }
       } catch {
-        // decode() が失敗した場合は onload/onerror でフォールバック待機
+        // 完了済み画像の decode() 失敗は品質劣化として通知する。
+        if (img.complete) {
+          return false;
+        }
+        // 読み込み中なら onload/onerror でフォールバック待機する。
       }
 
       if (img.complete) {

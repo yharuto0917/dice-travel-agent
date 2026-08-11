@@ -70,7 +70,7 @@ describe("preparePrintAssets", () => {
     expect(result.failed).toBe(0);
   });
 
-  it("ロード済みの画像は loading が eager に変更され、即解決する", async () => {
+  it("ロード済みの画像も decode 完了を待って成功扱いにする", async () => {
     const mockImg: Record<string, unknown> = {
       loading: "lazy",
       decoding: "async",
@@ -86,8 +86,27 @@ describe("preparePrintAssets", () => {
 
     expect(mockImg.loading).toBe("eager");
     expect(mockImg.decoding).toBe("sync");
+    expect(mockImg.decode).toHaveBeenCalledOnce();
     expect(result.total).toBe(1);
     expect(result.failed).toBe(0);
+  });
+
+  it("ロード済み画像の decode が失敗した場合は failed にカウントする", async () => {
+    const mockImg: Record<string, unknown> = {
+      loading: "lazy",
+      decoding: "async",
+      complete: true,
+      naturalWidth: 100,
+      decode: vi.fn().mockRejectedValue(new Error("Decode error")),
+    };
+
+    const root = createMockRoot([mockImg as unknown as HTMLImageElement]);
+    const resultPromise = preparePrintAssets(root);
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.total).toBe(1);
+    expect(result.failed).toBe(1);
   });
 
   it("decode() がエラーになる画像があっても failed としてカウントし解決する", async () => {

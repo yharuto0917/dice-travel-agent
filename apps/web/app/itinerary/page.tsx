@@ -114,11 +114,14 @@ function ItineraryInner({ planId }: { planId: string }) {
           />
 
           {/* Masking tape on top to look attached to a board */}
-          <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-48 h-10 masking-tape rotate-[-1deg] z-20" />
+          {/* 印刷時は print:overflow-visible でクリップが外れ、はみ出した分まで刷られてしまうので隠す */}
+          <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-48 h-10 masking-tape rotate-[-1deg] z-20 print:hidden" />
 
           <div className="relative z-10 flex flex-col">
             {plan ? (
-              <div className="pb-10 border-b-2 border-dashed border-line/20">
+              // CoverPage 側の print:break-after-page はこのラッパーの内側で改ページするため、
+              // 下余白と破線だけが次ページ先頭に残る。印刷時は両方を落としておく。
+              <div className="pb-10 border-b-2 border-dashed border-line/20 print:pb-0 print:border-b-0">
                 <CoverPage plan={plan} />
               </div>
             ) : null}

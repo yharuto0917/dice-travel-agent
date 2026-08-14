@@ -65,10 +65,10 @@ describe("generateItemImage", () => {
   });
 
   it("画像が空応答だった場合に1回再試行して成功すれば画像を返す", async () => {
-    const { generateText, generateImage } = await import("ai");
+    const { generateText, generateImage, NoImageGeneratedError } = await import("ai");
     vi.mocked(generateText).mockResolvedValueOnce({ text: "Generated prompt" } as never);
     vi.mocked(generateImage)
-      .mockResolvedValueOnce({ image: undefined } as never)
+      .mockRejectedValueOnce(new NoImageGeneratedError({ responses: [] }))
       .mockResolvedValueOnce({
         image: { uint8Array: new Uint8Array([4, 5, 6]) },
       } as never);
@@ -76,6 +76,13 @@ describe("generateItemImage", () => {
     const res = await generateItemImage(dummyEnv, "金閣寺");
     expect(res).not.toBeNull();
     expect(generateImage).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(generateImage).mock.calls[0]?.[0].providerOptions?.google).toEqual({
+      googleSearch: { searchTypes: { imageSearch: {}, webSearch: {} } },
+      aspectRatio: "1:1",
+    });
+    expect(vi.mocked(generateImage).mock.calls[1]?.[0].providerOptions?.google).toEqual({
+      aspectRatio: "1:1",
+    });
   });
 
   it("画像生成が例外を送出した場合も throw せず null を返す", async () => {

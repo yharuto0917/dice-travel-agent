@@ -4,7 +4,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ToolContext } from "../tools/context";
 import { generateItemImage } from "../tools/generate-image";
 import { createUsageCounter } from "./judgement";
-import { imageSubject, runDay, selectImageTargets } from "./orchestrator";
+import {
+  generateImagesForRepairedDays,
+  imageSubject,
+  runDay,
+  selectImageTargets,
+} from "./orchestrator";
 
 // LLM 呼び出しと画像生成だけを差し替える。tool()/stepCountIs() はツール定義の組み立てに
 // 使われるため実物を残す（モックすると buildTools/buildSubagents が壊れる）。
@@ -94,6 +99,40 @@ describe("imageSubject", () => {
   it("目的地名が無ければ主題のみ", () => {
     const item: PlanItem = { id: "i0", type: "spot", title: "嵐山" };
     expect(imageSubject(item, null)).toBe("嵐山");
+  });
+});
+
+describe("generateImagesForRepairedDays", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("空日から復旧した日だけ画像を生成し、既存日は触らない", async () => {
+    const existingDay = { dayNumber: 2, items: items(["spot"]) };
+    const before = {
+      title: "京都府の旅",
+      days: [{ dayNumber: 1, items: [] }, existingDay],
+    };
+    const after = {
+      ...before,
+      days: [{ dayNumber: 1, items: items(["spot", "activity"]) }, existingDay],
+    };
+    vi.mocked(generateItemImage)
+      .mockResolvedValueOnce({ url: "https://api.test/a.png", r2Key: "a", prompt: "spot-0" })
+      .mockResolvedValueOnce({
+        url: "https://api.test/b.png",
+        r2Key: "b",
+        prompt: "activity-1",
+      });
+
+    const result = await generateImagesForRepairedDays({} as never, before, after);
+
+    expect(generateItemImage).toHaveBeenCalledTimes(2);
+    expect(result.days?.[0]?.items.map((item) => item.image?.url)).toEqual([
+      "https://api.test/a.png",
+      "https://api.test/b.png",
+    ]);
+    expect(result.days?.[1]).toBe(existingDay);
   });
 });
 
@@ -195,6 +234,23 @@ describe("runDay の障害耐性", () => {
 
     expect(streamText).toHaveBeenCalledTimes(2);
     expect(result.status).toBe("ok");
+  });
+
+  it("再試行も error パートを返した場合は完了ではなく失敗として通知する", async () => {
+    vi.mocked(streamText)
+      .mockReturnValueOnce(streamOf([{ type: "error", error: new Error("429") }]) as never)
+      .mockReturnValueOnce(streamOf([{ type: "error", error: new Error("503") }]) as never);
+    vi.mocked(generateObject).mockResolvedValue({ object: structuredDay } as never);
+    vi.mocked(generateItemImage).mockResolvedValue(null);
+    const events: { groupId?: string | null; label: string; status?: string }[] = [];
+
+    await runDay({} as never, makeCtx(), plan, 1, undefined, (event) => events.push(event));
+
+    const retryResult = events.filter((event) => event.groupId === "retry-stream-1").at(-1);
+    expect(retryResult).toMatchObject({
+      label: "ストリームの再試行にも失敗しました",
+      status: "error",
+    });
   });
 
   it("根拠が集まっていれば error パートがあっても再試行しない", async () => {

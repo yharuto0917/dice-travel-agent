@@ -3,7 +3,7 @@ import type {
   GoogleGenerativeAIProviderOptions,
 } from "@ai-sdk/google";
 import { google } from "@ai-sdk/google";
-import { generateImage, generateText, stepCountIs } from "ai";
+import { generateImage, generateText, NoImageGeneratedError, stepCountIs } from "ai";
 import type { Bindings } from "../../env";
 import { createImageModel, createLlm, SUPERVISOR_MODEL_ID } from "../llm/provider";
 import type { GeneratedImage } from "./context";
@@ -60,7 +60,7 @@ export async function generateItemImage(
               5. **出力形式**: 挨拶や解説は一切含めず、完成した英語のプロンプトのみを出力してください。\n
               【入力と出力の例】\n
               ユーザー入力: 富士山と河口湖\n
-              出力:\n 
+              出力:\n
               Present a clear, 45° top-down isometric miniature 3D cartoon scene built on a perfect square base, featuring [A majestic high-angle bird's-eye view of Mount Fuji and Lake Kawaguchi at dawn, beautifully contained within a square-shaped miniature base. The iconic snow-capped peak takes center stage, brilliantly illuminated in a warm, glowing pink and golden light, showcasing its elegant symmetrical slopes. In the bottom foreground, a serene blue lake beautifully reflects the mountain, surrounded by lush green forests and vibrant pink cherry blossoms extending right to the crisp square edges. Cinematic lighting, with a striking contrast between the cool morning ambient shadows and the warm golden hour illumination. Captured with a wide-angle lens, showcasing extreme detail, sharp focus, 8k resolution, photorealistic landscape photography.]. Use soft, refined textures with realistic PBR materials and gentle, lifelike lighting and shadows. Use a clean, minimalistic composition with a muted, solid-colored background. No sky, no clouds, and no external environment beyond the square miniature base.\n`,
       providerOptions: {
         google: {
@@ -110,20 +110,21 @@ export async function generateItemImage(
       });
     };
 
-    let result = await doGenerate(true);
-    let image = result.image;
-
-    // 空応答（テキストのみ返却など）の場合は AI SDK がリトライしないため自前で1回リトライする。
-    // 同一条件の即時再投入は同じ結果になりやすいので、短いバックオフを挟み検索も外す。
-    if (!image) {
+    let result: Awaited<ReturnType<typeof doGenerate>>;
+    try {
+      result = await doGenerate(true);
+    } catch (error) {
+      abortSignal?.throwIfAborted();
+      // AI SDK v6 は画像なしを `image: undefined` では返さず NoImageGeneratedError を投げる。
+      // このケースだけ検索なしで取り直し、通信障害など他の例外は外側の catch に委ねる。
+      if (!NoImageGeneratedError.isInstance(error)) throw error;
       console.warn(`[generateItemImage] 画像が空応答だったため再試行します (${subject})`);
       await new Promise((resolve) => setTimeout(resolve, EMPTY_IMAGE_RETRY_DELAY_MS));
       abortSignal?.throwIfAborted();
       result = await doGenerate(false);
-      image = result.image;
     }
 
-    if (!image) return null;
+    const image = result.image;
     const mimeType = "image/png";
     const ext = "png";
     const key = `generated/${crypto.randomUUID()}.${ext}`;

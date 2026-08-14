@@ -16,7 +16,8 @@ import type { Bindings } from "../env";
 import { persistPlanRevision } from "./chat/plan-persistence";
 import { createUsageCounter, HITL_TIMEOUT_SEC } from "./flow/judgement";
 import { dayCountOf, mergeDay, nightsOf } from "./flow/merge";
-import { runDay, type TimelineInput } from "./flow/orchestrator";
+import { generateImagesForRepairedDays, runDay, type TimelineInput } from "./flow/orchestrator";
+import { planPersistenceStatus } from "./flow/plan-status";
 import { buildStepPlan } from "./flow/step-plan";
 import {
   answeredMap,
@@ -304,6 +305,14 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
         } catch {
           repaired = candidate;
         }
+        // runDay が空日を返した時点では画像対象が存在しない。fillEmptyDays で items が
+        // 復旧した日だけ画像生成の共通経路へ通し、復旧日が画像ゼロで保存されるのを防ぐ。
+        repaired = await generateImagesForRepairedDays(
+          this.env,
+          candidate,
+          repaired,
+          (status, thought) => this.setActivity(status, thought ?? null),
+        );
       }
 
       const recheck = checkPlan(repaired);
@@ -324,17 +333,31 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
     }
 
     const emptyDays = (finalPlan.days ?? []).filter((d) => d.items.length === 0);
-    if (emptyDays.length > 0) {
-      const emptyDayNumbers = emptyDays.map((d) => `${d.dayNumber}日目`).join("、");
+    const persistenceStatus = planPersistenceStatus(finalPlan);
+    finalPlan = { ...finalPlan, status: persistenceStatus };
+    await this.persistPlan(finalPlan, row, persistenceStatus);
+
+    if (persistenceStatus === "draft") {
+      const error =
+        emptyDays.length > 0
+          ? `一部の日程（${emptyDays.map((d) => `${d.dayNumber}日目`).join("、")}）の予定を生成できませんでした`
+          : "日程を生成できませんでした";
+      this.setState({
+        ...this.state,
+        phase: "error",
+        plan: finalPlan,
+        error,
+        activity: null,
+        thought: null,
+      });
       this.pushTimeline({
         kind: "phase",
-        label: `一部の日程（${emptyDayNumbers}）の予定を生成できませんでした`,
+        label: `${error}。プランは下書きとして保存しました`,
         status: "error",
-        groupId: "finalize-warning",
+        groupId: "finalize",
       });
+      return;
     }
-
-    await this.persistPlan(finalPlan, row);
 
     this.setState({
       ...this.state,
@@ -342,15 +365,13 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
       plan: finalPlan,
       filledSections: [...new Set([...this.state.filledSections, "summary"])],
       progress: 1,
+      error: null,
       activity: null,
       thought: null,
     });
     this.pushTimeline({
       kind: "phase",
-      label:
-        emptyDays.length > 0
-          ? "プランを保存しました（一部未完了の日程があります）"
-          : "プランが完成しました",
+      label: "プランが完成しました",
       status: "done",
       groupId: "finalize",
     });
@@ -414,11 +435,15 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
     this.setState({ ...this.state, timeline: timeline.slice(-TIMELINE_MAX) });
   }
 
-  /** 完成計画を D1 に保存。上書き前に旧版を plan_versions へスナップショットする（#16）。 */
-  private async persistPlan(finalPlan: TravelPlanDraft, row: PlanRow): Promise<void> {
+  /** 計画を D1 に保存。上書き前に旧版を plan_versions へスナップショットする（#16）。 */
+  private async persistPlan(
+    finalPlan: TravelPlanDraft,
+    row: PlanRow,
+    status: PlanRow["status"],
+  ): Promise<void> {
     // 版更新の手順（スナップショット→version+1）はチャットの修正承認（#20）と共通のため、
     // persistPlanRevision に集約している。
-    await persistPlanRevision(this.env, { plan: finalPlan, row, status: "completed" });
+    await persistPlanRevision(this.env, { plan: finalPlan, row, status });
 
     // 次回 loadPlanRow で最新を読むようキャッシュを無効化する。
     this.cachedRow = undefined;

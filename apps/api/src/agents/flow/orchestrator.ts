@@ -209,6 +209,31 @@ async function generateDayImages(
   }
 }
 
+/**
+ * 空日修復で新しく items が入った日だけ画像を補う。
+ *
+ * 日ごとの画像生成は内部で2並列なので、複数日をここでも並列化すると Worker 全体の
+ * 外向き接続数が膨らむ。修復日は順に処理し、画像生成の最大並列度を維持する。
+ */
+export async function generateImagesForRepairedDays(
+  env: Bindings,
+  before: TravelPlanDraft,
+  after: TravelPlanDraft,
+  onActivity?: ActivityCallback,
+): Promise<TravelPlanDraft> {
+  const beforeDays = before.days ?? [];
+  const days = [...(after.days ?? [])];
+
+  for (let index = 0; index < days.length; index++) {
+    const previousDay = beforeDays[index];
+    const repairedDay = days[index];
+    if (!previousDay || previousDay.items.length > 0 || !repairedDay?.items.length) continue;
+    days[index] = await generateDayImages(env, after, repairedDay, onActivity);
+  }
+
+  return { ...after, days };
+}
+
 /** ツール名 → 日本語の実行状況ラベル。ストリーミング中の表示に使う。 */
 const TOOL_LABELS: Record<string, string> = {
   touristSpotSearch: "観光スポットを検索しています",
@@ -398,9 +423,12 @@ export async function runDay(
    * throw も `streamErrors` に積み、下の再試行判定に載せる。成否を真偽値で返す。
    */
   const consumeStreamSafely = async (): Promise<boolean> => {
+    const errorCountBefore = streamErrors.length;
     try {
       await consumeStream(createStream());
-      return true;
+      // fullStream は provider error を throw せず `error` パートとして返すことがある。
+      // 例外の有無だけで成功判定すると、失敗した再試行を「完了」と誤表示してしまう。
+      return streamErrors.length === errorCountBefore;
     } catch (err) {
       streamErrors.push(err);
       console.error(`[runDay] Stream threw on day ${n}:`, err);

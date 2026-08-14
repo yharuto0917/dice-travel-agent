@@ -12,6 +12,7 @@ import { PlanDayGenSchema } from "@repo/shared";
 import { generateObject, stepCountIs, streamText, tool } from "ai";
 import { z } from "zod";
 import type { Bindings } from "../../env";
+import { mapWithConcurrency } from "../../lib/pool";
 import { createLlm, SUPERVISOR_MODEL_ID } from "../llm/provider";
 import { buildSubagents } from "../subagents";
 import { buildTools } from "../tools";
@@ -180,21 +181,20 @@ async function generateDayImages(
     // setup ステップで title は "${目的地}の旅" 形式。末尾の "の旅" を落として目的地名を得る。
     const destinationName = plan.title?.replace(/の旅$/, "").trim() || null;
 
-    const byIndex = new Map<number, GeneratedImage>();
+    // 並列度を絞りつつ全件を回す。チャンク分割だと同バッチの最も遅い1枚が他を待たせ、
+    // 1枚 = プロンプト拡張 + 画像生成（最大2回）と所要のばらつきが大きいため待ちが積み上がる。
+    // ワーカープールなら空いた枠から次を流せるので、同じ並列度でも所要が短くなる。
+    const settled = await mapWithConcurrency(targets, IMAGE_CONCURRENCY, (t) =>
+      generateItemImage(env, imageSubject(t.item, destinationName)),
+    );
 
-    // 2〜3並列でチャンク実行し、全件終了を待つ
-    for (let i = 0; i < targets.length; i += IMAGE_CONCURRENCY) {
-      const chunk = targets.slice(i, i + IMAGE_CONCURRENCY);
-      const settled = await Promise.allSettled(
-        chunk.map((t) => generateItemImage(env, imageSubject(t.item, destinationName))),
-      );
-      settled.forEach((res, k) => {
-        if (res.status === "fulfilled" && res.value) {
-          const t = chunk[k];
-          if (t) byIndex.set(t.index, res.value);
-        }
-      });
-    }
+    const byIndex = new Map<number, GeneratedImage>();
+    settled.forEach((res, k) => {
+      if (res.status === "fulfilled" && res.value) {
+        const t = targets[k];
+        if (t) byIndex.set(t.index, res.value);
+      }
+    });
 
     if (byIndex.size === 0) return day;
 
@@ -388,11 +388,37 @@ export async function runDay(
         });
       }
     }
-    // ループ終了時に未確定の思考が残っていれば確定する。
-    flushThinking();
   };
 
-  await consumeStream(createStream());
+  /**
+   * ストリーム消費を例外から守る。`fullStream` は通常エラーを `error` パートとして流すが、
+   * 接続断などで for-await 自体が throw することがある。ここで捕まえないと、
+   * finalizeDay/構造化で組み上げ済みの day ごと例外が runStep へ伝播し、
+   * 「1日が丸ごと消える」という本 PR が潰したはずの失敗モードに戻る。
+   * throw も `streamErrors` に積み、下の再試行判定に載せる。成否を真偽値で返す。
+   */
+  const consumeStreamSafely = async (): Promise<boolean> => {
+    try {
+      await consumeStream(createStream());
+      return true;
+    } catch (err) {
+      streamErrors.push(err);
+      console.error(`[runDay] Stream threw on day ${n}:`, err);
+      onEvent?.({
+        kind: "tool",
+        label: "データ収集ストリームが中断しました",
+        status: "error",
+        groupId: `stream-abort-${n}`,
+        detail: String(err).slice(0, 500),
+      });
+      return false;
+    } finally {
+      // 正常終了・例外いずれの場合も、未確定の思考を確定して履歴の行を閉じる。
+      flushThinking();
+    }
+  };
+
+  await consumeStreamSafely();
 
   // 根拠ゼロ（ツール結果も最終テキストも空）かつストリームエラーが発生していた場合、
   // 使用量上限に達していなければ短いバックオフの後に1回だけ再試行する
@@ -411,17 +437,13 @@ export async function runDay(
       groupId: `retry-stream-${n}`,
     });
     await new Promise((resolve) => setTimeout(resolve, 500));
-    try {
-      await consumeStream(createStream());
-      onEvent?.({
-        kind: "tool",
-        label: "ストリームの再試行が完了しました",
-        status: "done",
-        groupId: `retry-stream-${n}`,
-      });
-    } catch (err) {
-      console.error(`[runDay] Stream retry failed on day ${n}:`, err);
-    }
+    const retried = await consumeStreamSafely();
+    onEvent?.({
+      kind: "tool",
+      label: retried ? "ストリームの再試行が完了しました" : "ストリームの再試行にも失敗しました",
+      status: retried ? "done" : "error",
+      groupId: `retry-stream-${n}`,
+    });
   }
 
   // HITL が発火していたら、day を確定せずに中断を返す。空の日をマージしないため

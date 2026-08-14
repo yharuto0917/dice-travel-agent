@@ -12,6 +12,9 @@ import type { GeneratedImage } from "./context";
 const PROMPT_GENERATE_MODEL_ID = SUPERVISOR_MODEL_ID;
 const IMAGE_MODEL_ID = "gemini-3.1-flash-image";
 
+/** 空応答で再試行するまでの待ち（ms）。即時再投入は同じ結果を引きやすいため間を置く。 */
+const EMPTY_IMAGE_RETRY_DELAY_MS = 400;
+
 /**
  * 主題（アイテム名・場所名など）から1枚の画像を生成して R2 に保存し、配信URLを返す（#18）。
  *
@@ -86,28 +89,37 @@ export async function generateItemImage(
   try {
     abortSignal?.throwIfAborted();
 
-    const doGenerate = async () => {
+    // withSearch=false のときは googleSearch を外す。検索を許すと画像モデルが
+    // 「検索結果のテキスト」だけを返して画像を返さないことがあり、それが空応答の主因。
+    // 1回目は品質のため検索あり、2回目は確実に画像を得るため検索なしで投げ直す。
+    const doGenerate = async (withSearch: boolean) => {
+      // 条件付きスプレッドで組み立てると、スプレッド由来のキーには余剰プロパティ検査が
+      // 効かず `satisfies` がタイポを見逃す。両分岐ともオブジェクトリテラルのまま書く。
+      const googleOptions = withSearch
+        ? ({
+            googleSearch: { searchTypes: { imageSearch: {}, webSearch: {} } },
+            aspectRatio: "1:1",
+          } satisfies GoogleGenerativeAIImageProviderOptions)
+        : ({ aspectRatio: "1:1" } satisfies GoogleGenerativeAIImageProviderOptions);
+
       return await generateImage({
         model: createImageModel(env, IMAGE_MODEL_ID),
         abortSignal,
         prompt: imagePrompt,
-        providerOptions: {
-          google: {
-            googleSearch: { searchTypes: { imageSearch: {}, webSearch: {} } },
-            aspectRatio: "1:1",
-          } satisfies GoogleGenerativeAIImageProviderOptions,
-        },
+        providerOptions: { google: googleOptions },
       });
     };
 
-    let result = await doGenerate();
+    let result = await doGenerate(true);
     let image = result.image;
 
-    // 空応答（テキストのみ返却など）の場合は AI SDK がリトライしないため自前で1回リトライする
+    // 空応答（テキストのみ返却など）の場合は AI SDK がリトライしないため自前で1回リトライする。
+    // 同一条件の即時再投入は同じ結果になりやすいので、短いバックオフを挟み検索も外す。
     if (!image) {
       console.warn(`[generateItemImage] 画像が空応答だったため再試行します (${subject})`);
+      await new Promise((resolve) => setTimeout(resolve, EMPTY_IMAGE_RETRY_DELAY_MS));
       abortSignal?.throwIfAborted();
-      result = await doGenerate();
+      result = await doGenerate(false);
       image = result.image;
     }
 

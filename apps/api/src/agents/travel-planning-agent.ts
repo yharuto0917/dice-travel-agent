@@ -323,6 +323,17 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
       }
     }
 
+    const emptyDays = (finalPlan.days ?? []).filter((d) => d.items.length === 0);
+    if (emptyDays.length > 0) {
+      const emptyDayNumbers = emptyDays.map((d) => `${d.dayNumber}日目`).join("、");
+      this.pushTimeline({
+        kind: "phase",
+        label: `一部の日程（${emptyDayNumbers}）の予定を生成できませんでした`,
+        status: "error",
+        groupId: "finalize-warning",
+      });
+    }
+
     await this.persistPlan(finalPlan, row);
 
     this.setState({
@@ -336,7 +347,10 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
     });
     this.pushTimeline({
       kind: "phase",
-      label: "プランが完成しました",
+      label:
+        emptyDays.length > 0
+          ? "プランを保存しました（一部未完了の日程があります）"
+          : "プランが完成しました",
       status: "done",
       groupId: "finalize",
     });

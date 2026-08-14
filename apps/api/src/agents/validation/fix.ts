@@ -63,41 +63,49 @@ export async function fillEmptyDays(
   ].join("\n");
 
   // LLM クライアントは全日で不変。各日のループ内で作り直すと同一の認証/Gateway
-  // 構成のプロバイダを無駄に再生成するため、Promise.all の外で一度だけ生成する。
+  // 構成のプロバイダを無駄に再生成するため、外で一度だけ生成する。
   const model = createLlm(env, SUPERVISOR_MODEL_ID);
 
-  const repaired = await Promise.all(
-    days.map(async (day): Promise<PlanDay> => {
-      if (day.items.length > 0) return day;
-      try {
-        const { object } = await generateObject({
-          model,
-          // フラットな生成スキーマで anyOf を回避し、items が空のまま返るのを防ぐ。
-          schema: PlanDayGenSchema,
-          temperature: 0,
-          maxOutputTokens: DAY_REPAIR_MAX_OUTPUT_TOKENS,
-          // 出力が小さく安価なので、JSON 破綻時に取り直せるよう試行を 1 回多めに取る。
-          maxRetries: 2,
-          providerOptions: {
-            google: {
-              thinkingConfig: { thinkingLevel: "low", includeThoughts: false },
-            } satisfies GoogleGenerativeAIProviderOptions,
-          },
-          system:
-            "あなたは1日分の旅行旅程を構造化 PlanDay として組み立てる専門家です。妥当な startTime を付けた4〜7件の、現実的で順序立てた予定（観光スポット・食事・移動など）を必ず作成してください。目的地に実在するよく知られた観光スポット・飲食店・名所をあなたの知識から補ってください。架空の場所を作ってはいけませんが、items を空にすることは絶対に禁止です——必ず具体的な予定で埋めてください。各 item には `description`（日本語1〜2文の詳細説明）を必ず付け、そこで何をするか・見どころや名物を具体的に書くこと（タイトルの言い換えや空文字は不可）。スキーマや検証に関するメタ的な文言をどのフィールドにも書かないこと。出力（title・description・各 item の名称など、すべての自然言語フィールド）は必ず日本語で記述してください。`title` は『N日目』のような短いラベルにしてください。",
-          prompt: `対象は ${day.dayNumber}日目です。この日の itinerary（items）が空なので、具体的な予定で埋めてください。\n\n旅行のコンテキスト:\n${contextBlock}`,
-        });
-        // 生成スキーマ（フラット）→ 保存スキーマ（union）。各 item は type により union の
-        // いずれかを満たすため実体は互換。型上は別物なので PlanDay へキャストする。
-        return { ...object, dayNumber: day.dayNumber } as PlanDay;
-      } catch {
-        // この日は再生成に失敗。元の（空の）日のままにして他日へ波及させない。
-        return day;
-      }
-    }),
-  );
+  const repairedDays: PlanDay[] = [];
+  const CONCURRENCY = 2;
 
-  return { ...plan, days: repaired };
+  for (let i = 0; i < days.length; i += CONCURRENCY) {
+    const chunk = days.slice(i, i + CONCURRENCY);
+    const chunkResults = await Promise.all(
+      chunk.map(async (day): Promise<PlanDay> => {
+        if (day.items.length > 0) return day;
+        try {
+          const { object } = await generateObject({
+            model,
+            // フラットな生成スキーマで anyOf を回避し、items が空のまま返るのを防ぐ。
+            schema: PlanDayGenSchema,
+            temperature: 0,
+            maxOutputTokens: DAY_REPAIR_MAX_OUTPUT_TOKENS,
+            // 出力が小さく安価なので、JSON 破綻時に取り直せるよう試行を 1 回多めに取る。
+            maxRetries: 2,
+            providerOptions: {
+              google: {
+                thinkingConfig: { thinkingLevel: "low", includeThoughts: false },
+              } satisfies GoogleGenerativeAIProviderOptions,
+            },
+            system:
+              "あなたは1日分の旅行旅程を構造化 PlanDay として組み立てる専門家です。妥当な startTime を付けた4〜7件の、現実的で順序立てた予定（観光スポット・食事・移動など）を必ず作成してください。目的地に実在するよく知られた観光スポット・飲食店・名所をあなたの知識から補ってください。架空の場所を作ってはいけませんが、items を空にすることは絶対に禁止です——必ず具体的な予定で埋めてください。各 item には `description`（日本語1〜2文の詳細説明）を必ず付け、そこで何をするか・見どころや名物を具体的に書くこと（タイトルの言い換えや空文字は不可）。スキーマや検証に関するメタ的な文言をどのフィールドにも書かないこと。出力（title・description・各 item の名称など、すべての自然言語フィールド）は必ず日本語で記述してください。`title` は『N日目』のような短いラベルにしてください。",
+            prompt: `対象は ${day.dayNumber}日目です。この日の itinerary（items）が空なので、具体的な予定で埋めてください。\n\n旅行のコンテキスト:\n${contextBlock}`,
+          });
+          // 生成スキーマ（フラット）→ 保存スキーマ（union）。各 item は type により union の
+          // いずれかを満たすため実体は互換。型上は別物なので PlanDay へキャストする。
+          return { ...object, dayNumber: day.dayNumber } as PlanDay;
+        } catch (error) {
+          // この日は再生成に失敗。元の（空の）日のままにして他日へ波及させない。
+          console.warn(`[fillEmptyDays] ${day.dayNumber}日目の再生成に失敗しました:`, error);
+          return day;
+        }
+      }),
+    );
+    repairedDays.push(...chunkResults);
+  }
+
+  return { ...plan, days: repairedDays };
 }
 
 /**

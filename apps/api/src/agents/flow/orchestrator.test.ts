@@ -8,17 +8,17 @@ function items(types: PlanItem["type"][]): PlanDay["items"] {
 }
 
 describe("selectImageTargets", () => {
-  it("観光名所(spot)のみを対象に選ぶ", () => {
+  it("観光名所(spot)および体験(activity)を対象に選ぶ", () => {
     const targets = selectImageTargets(items(["spot", "meal", "lodging", "activity", "spot"]));
-    expect(targets.map((t) => t.index)).toEqual([0, 4]);
+    expect(targets.map((t) => t.index)).toEqual([0, 3, 4]);
   });
 
-  it("観光名所以外（食事/宿/移動/体験/自由）には生成しない", () => {
-    const targets = selectImageTargets(items(["meal", "lodging", "transport", "activity", "free"]));
+  it("観光名所・体験以外（食事/宿/移動/自由）には生成しない", () => {
+    const targets = selectImageTargets(items(["meal", "lodging", "transport", "free"]));
     expect(targets).toEqual([]);
   });
 
-  it("上限は6件（観光名所が多い日でも6件で打ち切る）", () => {
+  it("上限は6件（観光名所・体験が多い日でも6件で打ち切る）", () => {
     const targets = selectImageTargets(items(Array(9).fill("spot")));
     expect(targets).toHaveLength(6);
     expect(targets.map((t) => t.index)).toEqual([0, 1, 2, 3, 4, 5]);
@@ -72,5 +72,16 @@ describe("imageSubject", () => {
   it("目的地名が無ければ主題のみ", () => {
     const item: PlanItem = { id: "i0", type: "spot", title: "嵐山" };
     expect(imageSubject(item, null)).toBe("嵐山");
+  });
+});
+
+describe("runDay error handling and image generation robustness", () => {
+  it("selectImageTargets は spot と activity の両方を対象に選ぶ", () => {
+    const targets = selectImageTargets([
+      { id: "1", type: "spot", title: "スポット1" },
+      { id: "2", type: "activity", title: "陶芸体験" },
+      { id: "3", type: "meal", title: "昼食" },
+    ]);
+    expect(targets.map((t) => t.index)).toEqual([0, 1]);
   });
 });

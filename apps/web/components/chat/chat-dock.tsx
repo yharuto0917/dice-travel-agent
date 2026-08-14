@@ -94,7 +94,7 @@ export function ChatDock({ title, children, badge = false }: ChatDockProps) {
         type="button"
         onClick={() => setOpen(true)}
         aria-label={`${title}を開く`}
-        className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full border-2 border-line bg-primary text-primary-foreground shadow-toy-lg transition-all active:translate-x-[2px] active:translate-y-[2px] active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:bottom-6 sm:right-6"
+        className="fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-4 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full border-2 border-line bg-primary text-primary-foreground shadow-toy-lg transition-all active:translate-x-[2px] active:translate-y-[2px] active:shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:bottom-6 sm:right-6 print:hidden"
       >
         <ChatCircleDots size={26} weight="fill" />
         {badge ? (
@@ -115,7 +115,7 @@ export function ChatDock({ title, children, badge = false }: ChatDockProps) {
         tabIndex={-1}
         aria-hidden
         onClick={close}
-        className="fixed inset-0 z-40 cursor-default bg-ink/30 sm:bg-ink/10"
+        className="fixed inset-0 z-40 cursor-default bg-ink/30 sm:bg-ink/10 print:hidden"
       />
 
       <div
@@ -124,7 +124,7 @@ export function ChatDock({ title, children, badge = false }: ChatDockProps) {
         aria-modal="true"
         aria-labelledby={titleId}
         className={cn(
-          "fixed inset-x-0 bottom-0 z-50 flex flex-col rounded-t-3xl border-2 border-line bg-surface shadow-toy-lg",
+          "fixed inset-x-0 bottom-0 z-50 flex flex-col rounded-t-3xl border-2 border-line bg-surface shadow-toy-lg print:hidden",
           // モバイル: 画面の 80% までのボトムドロワー。キーボード表示時も入力欄が隠れないよう
           // dvh を使い、セーフエリア分の余白を確保する。
           "max-h-[80dvh]",

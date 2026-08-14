@@ -46,7 +46,9 @@ export default function RootLayout({
       <body className="bg-background text-foreground">
         <Providers>
           {/* Mobile-first: スマホ幅のアプリフレームを中央寄せ（PCではジオラマ上の端末風） */}
-          <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col">{children}</div>
+          <div className="app-frame mx-auto flex min-h-dvh w-full max-w-md flex-col">
+            {children}
+          </div>
         </Providers>
       </body>
     </html>

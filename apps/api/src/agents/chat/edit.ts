@@ -47,7 +47,7 @@ const EDIT_FIX_ATTEMPTS = 1;
 /**
  * 1回の修正で**新しく生成する**画像の上限。
  *
- * 計画生成（`flow/orchestrator.ts` の `MAX_IMAGES_PER_DAY` = 6枚/日）と違い、修正は
+ * 計画生成（`flow/orchestrator.ts` の `MAX_GENERATED_IMAGES_PER_PLAN` = 6枚/計画）と違い、修正は
  * チャットの応答待ち時間に直結する。画像1枚あたり「英語プロンプト生成 + 画像生成」の
  * 2回のモデル呼び出しがかかるため、待ち時間とコストの上限としてここで絞る。
  * 据え置かれた予定の画像は {@link carryOverImages} が引き継ぐので、この枠は消費しない。
@@ -346,7 +346,7 @@ export function sanitizeGeneratedDay(
   const sanitized = {
     ...day,
     dayNumber,
-    items: day.items.map(({ image: _image, ...item }) => ({
+    items: day.items.map(({ image: _image, imagePriority: _imagePriority, ...item }) => ({
       ...item,
       title: clampText(item.title, MAX_TITLE_LEN) ?? item.title,
       description: clampText(item.description, MAX_DESC_LEN),

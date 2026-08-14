@@ -117,6 +117,15 @@ export const PlanItemGenSchema = z.object({
       point: GeoPointSchema.optional(),
     })
     .optional(),
+  imagePriority: z
+    .number()
+    .int()
+    .min(1)
+    .max(3)
+    .optional()
+    .describe(
+      "しおりに写真を載せる価値の高さ。1=ぜひ載せたい 3=なくてもよい。観光名所は原則1、体験は2、それ以外は基本つけない",
+    ),
 });
 export type PlanItemGen = z.infer<typeof PlanItemGenSchema>;
 

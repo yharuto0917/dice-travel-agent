@@ -6,7 +6,10 @@ import { generateItemImage } from "../tools/generate-image";
 import { createUsageCounter } from "./judgement";
 import {
   generateImagesForRepairedDays,
+  imageBudgetForDay,
   imageSubject,
+  MAX_GENERATED_IMAGES_PER_PLAN,
+  remainingImageBudget,
   runDay,
   selectImageTargets,
 } from "./orchestrator";
@@ -35,12 +38,33 @@ function items(types: PlanItem["type"][]): PlanDay["items"] {
 }
 
 describe("selectImageTargets", () => {
-  it("観光名所(spot)および体験(activity)を対象に選ぶ", () => {
+  it("観光名所(spot: 優先度1)および体験(activity: 優先度2)を対象に選び、優先度順に並べる", () => {
     const targets = selectImageTargets(items(["spot", "meal", "lodging", "activity", "spot"]));
-    expect(targets.map((t) => t.index)).toEqual([0, 3, 4]);
+    // spot (0, 4) が priority 1、activity (3) が priority 2。
+    expect(targets.map((t) => t.index)).toEqual([0, 4, 3]);
   });
 
-  it("観光名所・体験以外（食事/宿/移動/自由）には生成しない", () => {
+  it("Agent の明示指定 (imagePriority) が type 由来の既定値に勝つ", () => {
+    const list: (PlanItem & { imagePriority?: number })[] = [
+      { id: "i0", type: "spot", title: "有名寺院", imagePriority: 3 }, // spot だが priority 3 に後回し
+      { id: "i1", type: "meal", title: "名物料理", imagePriority: 1 }, // meal だが priority 1 で最優先
+      { id: "i2", type: "activity", title: "陶芸体験" }, // 未指定のため activity 既定の priority 2
+    ];
+    const targets = selectImageTargets(list);
+    expect(targets.map((t) => t.index)).toEqual([1, 2, 0]);
+  });
+
+  it("全項目が同順位のときは出現順（安定ソート）を保つ", () => {
+    const list: (PlanItem & { imagePriority?: number })[] = [
+      { id: "i0", type: "spot", title: "スポット0", imagePriority: 1 },
+      { id: "i1", type: "spot", title: "スポット1", imagePriority: 1 },
+      { id: "i2", type: "activity", title: "体験2", imagePriority: 1 },
+    ];
+    const targets = selectImageTargets(list);
+    expect(targets.map((t) => t.index)).toEqual([0, 1, 2]);
+  });
+
+  it("観光名所・体験以外で priority 未指定のもの（食事/宿/移動/自由）には生成しない", () => {
     const targets = selectImageTargets(items(["meal", "lodging", "transport", "free"]));
     expect(targets).toEqual([]);
   });
@@ -80,6 +104,58 @@ describe("selectImageTargets", () => {
   });
 });
 
+describe("remainingImageBudget & imageBudgetForDay", () => {
+  it("remainingImageBudget は AI 生成画像 (generated: true) のみをカウントして残枠を算出する", () => {
+    const plan = {
+      nights: 1,
+      days: [
+        {
+          dayNumber: 1,
+          items: [
+            { id: "1", type: "spot" as const, title: "A", image: { url: "a", generated: true } },
+            { id: "2", type: "spot" as const, title: "B", image: { url: "b", generated: false } }, // 検索画像
+          ],
+        },
+      ],
+    };
+    expect(remainingImageBudget(plan)).toBe(MAX_GENERATED_IMAGES_PER_PLAN - 1);
+  });
+
+  it("imageBudgetForDay は工程数に応じて枠を割り当てる (ceil(items / 2))", () => {
+    const plan = { nights: 0, days: [] }; // 日帰り（1日）
+    // 4工程 → 2枠
+    expect(imageBudgetForDay(plan, 1, 4)).toBe(2);
+    // 5工程 → 3枠
+    expect(imageBudgetForDay(plan, 1, 5)).toBe(3);
+    // 6工程 → 3枠
+    expect(imageBudgetForDay(plan, 1, 6)).toBe(3);
+    // 10工程 → 5枠
+    expect(imageBudgetForDay(plan, 1, 10)).toBe(5);
+  });
+
+  it("imageBudgetForDay は残日数に応じた公平配分を行う", () => {
+    // 2泊3日（3日間）、残枠6枚
+    const plan3Days = { nights: 2, days: [] };
+    // 1日目（残3日）: 6 / 3 = 2枚
+    expect(imageBudgetForDay(plan3Days, 1, 6)).toBe(2);
+
+    // 1日目に2枚消費した後の2日目（残2日、残4枚）: 4 / 2 = 2枚
+    const planDay2 = {
+      nights: 2,
+      days: [
+        {
+          dayNumber: 1,
+          items: [
+            { id: "1", type: "spot" as const, title: "A", image: { url: "a", generated: true } },
+            { id: "2", type: "spot" as const, title: "B", image: { url: "b", generated: true } },
+          ],
+        },
+      ],
+    };
+    expect(imageBudgetForDay(planDay2, 2, 6)).toBe(2);
+  });
+});
+
 describe("imageSubject", () => {
   it("場所名があれば優先し、目的地名で補強する", () => {
     const item: PlanItem = {
@@ -108,14 +184,18 @@ describe("generateImagesForRepairedDays", () => {
   });
 
   it("空日から復旧した日だけ画像を生成し、既存日は触らない", async () => {
-    const existingDay = { dayNumber: 2, items: items(["spot"]) };
+    const existingDay = { dayNumber: 2, items: items(["spot", "meal", "transport", "free"]) };
     const before = {
       title: "京都府の旅",
+      nights: 1,
       days: [{ dayNumber: 1, items: [] }, existingDay],
     };
     const after = {
       ...before,
-      days: [{ dayNumber: 1, items: items(["spot", "activity"]) }, existingDay],
+      days: [
+        { dayNumber: 1, items: items(["spot", "activity", "meal", "transport"]) },
+        existingDay,
+      ],
     };
     vi.mocked(generateItemImage)
       .mockResolvedValueOnce({ url: "https://api.test/a.png", r2Key: "a", prompt: "spot-0" })
@@ -131,8 +211,43 @@ describe("generateImagesForRepairedDays", () => {
     expect(result.days?.[0]?.items.map((item) => item.image?.url)).toEqual([
       "https://api.test/a.png",
       "https://api.test/b.png",
+      undefined,
+      undefined,
     ]);
     expect(result.days?.[1]).toBe(existingDay);
+  });
+
+  it("修復日を跨いで残枠を正しく伝播して減らす", async () => {
+    // 2日とも空日で、1日目4件(spot×4)、2日目4件(spot×4)
+    const before = {
+      title: "京都府の旅",
+      nights: 1,
+      days: [
+        { dayNumber: 1, items: [] },
+        { dayNumber: 2, items: [] },
+      ],
+    };
+    const after = {
+      ...before,
+      days: [
+        { dayNumber: 1, items: items(["spot", "spot", "spot", "spot"]) },
+        { dayNumber: 2, items: items(["spot", "spot", "spot", "spot"]) },
+      ],
+    };
+    vi.mocked(generateItemImage).mockResolvedValue({
+      url: "https://api.test/img.png",
+      r2Key: "k",
+      prompt: "spot",
+    });
+
+    const result = await generateImagesForRepairedDays({} as never, before, after);
+    // 1日目: 2日プランで残6枚、残2日 → 3枚生成
+    // 2日目: 残3枚、残1日 → 2枚生成（4工程で上限2枚）
+    // 合計 4 枚（1日目 4工程→min(2, 3)=2枚、2日目 4工程→min(2, 4)=2枚）
+    const totalGenerated = (result.days ?? [])
+      .flatMap((d) => d.items)
+      .filter((i) => i.image?.generated).length;
+    expect(totalGenerated).toBe(4);
   });
 });
 
@@ -173,6 +288,8 @@ describe("runDay の障害耐性", () => {
     items: [
       { id: "s1", type: "spot", title: "清水寺", description: "京都を代表する古刹を参拝します。" },
       { id: "s2", type: "spot", title: "金閣寺", description: "金箔に覆われた舎利殿を眺めます。" },
+      { id: "s3", type: "meal", title: "昼食", description: "美味しい湯豆腐をいただきます。" },
+      { id: "s4", type: "transport", title: "移動", description: "バスで移動します。" },
     ],
   };
 
@@ -206,7 +323,7 @@ describe("runDay の障害耐性", () => {
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
     // 日そのものが捨てられていないこと（旧実装では Promise.all の reject で消えていた）。
-    expect(result.day.items).toHaveLength(2);
+    expect(result.day.items).toHaveLength(4);
     expect(result.day.items[0]?.image).toBeUndefined();
     expect(result.day.items[1]?.image?.url).toBe("https://api.test/assets/x.png");
   });
@@ -220,7 +337,7 @@ describe("runDay の障害耐性", () => {
 
     expect(result.status).toBe("ok");
     if (result.status !== "ok") return;
-    expect(result.day.items).toHaveLength(2);
+    expect(result.day.items).toHaveLength(4);
   });
 
   it("error パートで根拠ゼロなら1回だけストリームを再試行する", async () => {
@@ -279,5 +396,34 @@ describe("runDay の障害耐性", () => {
     if (result.status !== "ok") return;
     // 呼び出し側（checker / fillEmptyDays）が後段で埋められるよう、空日として返す。
     expect(result.day).toEqual({ dayNumber: 3, title: "3日目", items: [] });
+  });
+
+  it("生成完了後の day.items から imagePriority が漏れなく除去される（漏れ止め回帰テスト）", async () => {
+    const dayWithPriority = {
+      dayNumber: 1,
+      title: "1日目",
+      items: [
+        {
+          id: "s1",
+          type: "spot",
+          title: "清水寺",
+          description: "京都を代表する古刹を参拝します。",
+          imagePriority: 1,
+        },
+      ],
+    };
+    vi.mocked(streamText).mockReturnValue(streamOf([]) as never);
+    vi.mocked(generateObject).mockResolvedValue({ object: dayWithPriority } as never);
+    vi.mocked(generateItemImage).mockResolvedValue({
+      url: "https://api.test/assets/x.png",
+      r2Key: "x",
+      prompt: "清水寺",
+    });
+
+    const result = await runDay({} as never, makeCtx(), plan, 1);
+
+    expect(result.status).toBe("ok");
+    if (result.status !== "ok") return;
+    expect("imagePriority" in result.day.items[0]!).toBe(false);
   });
 });

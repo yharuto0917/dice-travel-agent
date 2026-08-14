@@ -120,33 +120,89 @@ function sanitizeDay(day: PlanDay): PlanDay | null {
   return result.success ? (result.data as PlanDay) : null;
 }
 
-/** 画像を生成する対象の種別。観光名所（観光スポット `spot`）および体験（`activity`）を対象とする（#18, #21）。 */
-const IMAGE_TARGET_TYPES: ReadonlySet<PlanItem["type"]> = new Set(["spot", "activity"]);
+/** 1計画あたりの生成画像の上限（#18, #21）。 */
+export const MAX_GENERATED_IMAGES_PER_PLAN = 6;
 
-/** 各日の生成枚数の上限（コスト・レイテンシの上限）。 */
-const MAX_IMAGES_PER_DAY = 6;
+/** 1日あたりの生成枚数の二次上限（退行防止）。 */
+export const MAX_IMAGES_PER_DAY = 6;
 
 /** 画像生成の同時並列実行数（Cloudflare Workers の同時接続制限およびレートリミット対策）。 */
 const IMAGE_CONCURRENCY = 2;
 
+/** type ごとのデフォルト画像掲載優先度（Agent が imagePriority を明示しなかった場合のフォールバック）。 */
+const DEFAULT_TYPE_PRIORITY: Partial<Record<PlanItem["type"], number>> = {
+  spot: 1,
+  activity: 2,
+};
+
+type ItemWithPriority = PlanItem & { imagePriority?: number };
+
+/**
+ * 計画全体で残っている画像生成予算を算出する（#18, #21）。
+ * `item.image?.generated === true`（AI生成画像）のみをカウントし、検索API由来の画像は消費しない。
+ */
+export function remainingImageBudget(plan: TravelPlanDraft): number {
+  let count = 0;
+  for (const day of plan.days ?? []) {
+    for (const item of day.items ?? []) {
+      if (item.image?.generated === true) {
+        count++;
+      }
+    }
+  }
+  return Math.max(0, MAX_GENERATED_IMAGES_PER_PLAN - count);
+}
+
+/**
+ * 当該日の画像生成枠（上限枚数）を算出する（#18, #21）。
+ * - 1日の枠: min(ceil(dayItems / 2), 残りの計画予算を残日数で割った公平配分, MAX_IMAGES_PER_DAY, remBudget)
+ */
+export function imageBudgetForDay(
+  plan: TravelPlanDraft,
+  dayNumber: number,
+  dayItemCount: number,
+): number {
+  const totalDays =
+    plan.nights !== undefined && plan.nights >= 0 ? plan.nights + 1 : plan.days?.length || 1;
+  const remainingDays = Math.max(1, totalDays - dayNumber + 1);
+  const remBudget = remainingImageBudget(plan);
+  if (remBudget <= 0 || dayItemCount <= 0) return 0;
+
+  const fairShare = Math.ceil(remBudget / remainingDays);
+  const itemCap = Math.ceil(dayItemCount / 2);
+  return Math.max(0, Math.min(itemCap, fairShare, MAX_IMAGES_PER_DAY, remBudget));
+}
+
 /**
  * 画像を生成する対象アイテムを選ぶ（#18, #21）。
  *
- * 観光名所（`spot`）および体験（`activity`）のうち、まだ image を持たないものを上限まで採る。
- * 食事・宿・移動・自由時間には生成しない。対象を1件も含まない日は画像なしになる。
+ * 各アイテムの `imagePriority`（Agent指定値: 1=ぜひ載せたい 2=体験等 3=なくてもよい）を最優先し、
+ * 未指定なら type 由来の既定値（spot: 1, activity: 2, その他: 未指定）で解決する。
+ * priority が存在し（未指定の食事・宿・移動等は対象外）、まだ image を持たないアイテムを
+ * 優先度昇順（1 > 2 > 3）で安定ソートし、上限 `limit` 件を抽出する。同順位は出現順を保つ。
  *
- * `limit` は生成枚数の上限。既定は1日あたりの上限だが、チャットの修正経路のように
- * 「修正1回あたり」で予算を配る呼び出し側が、残り枚数を渡して絞り込めるようにしている。
+ * `limit` は生成枚数の上限。既定は1日あたりの二次上限だが、通常は `imageBudgetForDay` の計算枠を渡す。
  */
 export function selectImageTargets(
-  items: PlanItem[],
+  items: ItemWithPriority[],
   limit: number = MAX_IMAGES_PER_DAY,
-): { index: number; item: PlanItem }[] {
+): { index: number; item: ItemWithPriority }[] {
   if (limit <= 0) return [];
-  return items
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => !item.image && IMAGE_TARGET_TYPES.has(item.type))
-    .slice(0, limit);
+
+  const candidates = items
+    .map((item, index) => {
+      const priority = item.imagePriority ?? DEFAULT_TYPE_PRIORITY[item.type];
+      return { item, index, priority };
+    })
+    .filter(
+      (c): c is { item: ItemWithPriority; index: number; priority: number } =>
+        !c.item.image && c.priority !== undefined,
+    );
+
+  // 安定ソート（priority 昇順、同順位は元の出現順が保たれる）
+  candidates.sort((a, b) => a.priority - b.priority);
+
+  return candidates.slice(0, limit).map(({ index, item }) => ({ index, item }));
 }
 
 /**
@@ -161,29 +217,35 @@ export function imageSubject(item: PlanItem, destinationName: string | null): st
 /**
  * 日の構造化後に、観光名所・体験へ内容一致の風景画像を**決定的に**生成・埋め込む（#18, #21）。
  *
- * かつては LLM が `generateImage` ツールを呼ぶ設計だったが、ステップ上限との競合や
- * URL（ランダム UUID）の転記失敗で「安定して出ない／貼り付け先と内容が不一致」だった。
- * ここでは LLM のツール呼び出しに依存せず、観光名所（`spot`）や体験（`activity`）の
- * タイトル・場所名から画像を並列生成する（上限 {@link MAX_IMAGES_PER_DAY} 枚）。
- * 1枚の失敗で日全体が落ちないよう `Promise.allSettled` で集約する。
+ * 工程数・残り日数から動的に割り当てた枠に基づき、Agent の指定優先度（`imagePriority`）順に
+ * 画像を並列生成する（計画全体で最大 {@link MAX_GENERATED_IMAGES_PER_PLAN} 枚）。
+ * 生成完了後、D1 やクライアントへフラグが漏れないよう items から `imagePriority` を明示的に除去する。
  */
 async function generateDayImages(
   env: Bindings,
   plan: TravelPlanDraft,
   day: PlanDay,
   onActivity?: ActivityCallback,
+  onEvent?: TimelineCallback,
 ): Promise<PlanDay> {
   try {
-    const targets = selectImageTargets(day.items);
-    if (targets.length === 0) return day;
+    const budget = imageBudgetForDay(plan, day.dayNumber, day.items.length);
+    const targets = selectImageTargets(day.items, budget);
+    if (targets.length === 0) {
+      // 対象がない場合も items から imagePriority を確実に落とす
+      return {
+        ...day,
+        items: day.items.map((item) => {
+          const { imagePriority: _p, ...cleanItem } = item as ItemWithPriority;
+          return cleanItem;
+        }),
+      };
+    }
 
     onActivity?.("風景画像を生成しています…");
     // setup ステップで title は "${目的地}の旅" 形式。末尾の "の旅" を落として目的地名を得る。
     const destinationName = plan.title?.replace(/の旅$/, "").trim() || null;
 
-    // 並列度を絞りつつ全件を回す。チャンク分割だと同バッチの最も遅い1枚が他を待たせ、
-    // 1枚 = プロンプト拡張 + 画像生成（最大2回）と所要のばらつきが大きいため待ちが積み上がる。
-    // ワーカープールなら空いた枠から次を流せるので、同じ並列度でも所要が短くなる。
     const settled = await mapWithConcurrency(targets, IMAGE_CONCURRENCY, (t) =>
       generateItemImage(env, imageSubject(t.item, destinationName)),
     );
@@ -196,16 +258,30 @@ async function generateDayImages(
       }
     });
 
-    if (byIndex.size === 0) return day;
+    onEvent?.({
+      kind: "tool",
+      label: `${day.dayNumber}日目の画像生成`,
+      status: byIndex.size > 0 ? "done" : "error",
+      detail: `${targets.length}件中${byIndex.size}件の画像を生成しました`,
+    });
 
     const items = day.items.map((item, index) => {
+      const { imagePriority: _p, ...cleanItem } = item as ItemWithPriority;
       const img = byIndex.get(index);
-      return img ? { ...item, image: { url: img.url, alt: img.prompt, generated: true } } : item;
+      return img
+        ? { ...cleanItem, image: { url: img.url, alt: img.prompt, generated: true } }
+        : cleanItem;
     });
     return { ...day, items };
   } catch (error) {
     console.error("[generateDayImages] Error:", error);
-    return day;
+    return {
+      ...day,
+      items: day.items.map((item) => {
+        const { imagePriority: _p, ...cleanItem } = item as ItemWithPriority;
+        return cleanItem;
+      }),
+    };
   }
 }
 
@@ -213,7 +289,7 @@ async function generateDayImages(
  * 空日修復で新しく items が入った日だけ画像を補う。
  *
  * 日ごとの画像生成は内部で2並列なので、複数日をここでも並列化すると Worker 全体の
- * 外向き接続数が膨らむ。修復日は順に処理し、画像生成の最大並列度を維持する。
+ * 外向き接続数が膨らむ。修復日は順に処理し、各反復で最新の days を渡して残枠を正しく減らす。
  */
 export async function generateImagesForRepairedDays(
   env: Bindings,
@@ -228,7 +304,7 @@ export async function generateImagesForRepairedDays(
     const previousDay = beforeDays[index];
     const repairedDay = days[index];
     if (!previousDay || previousDay.items.length > 0 || !repairedDay?.items.length) continue;
-    days[index] = await generateDayImages(env, after, repairedDay, onActivity);
+    days[index] = await generateDayImages(env, { ...after, days }, repairedDay, onActivity);
   }
 
   return { ...after, days };
@@ -503,11 +579,11 @@ export async function runDay(
     day = structured?.items.length ? structured : { dayNumber: n, title: `${n}日目`, items: [] };
   }
 
-  // 各アイテムへ内容一致の風景画像を決定的に生成・埋め込む（各日2枚以上, #18, #21）。
+  // 各アイテムへ内容一致の風景画像を決定的に生成・埋め込む（#18, #21）。
   // 全経路（finalizeDay 採用・構造化・フォールバック）に共通で適用する単一の出口。
   let dayWithImages = day;
   try {
-    dayWithImages = await generateDayImages(env, plan, day, onActivity);
+    dayWithImages = await generateDayImages(env, plan, day, onActivity, onEvent);
   } catch (err) {
     console.error(`[runDay] Failed to generate images for day ${n}:`, err);
     dayWithImages = day;
@@ -570,7 +646,7 @@ async function structureDay(
         } satisfies GoogleGenerativeAIProviderOptions,
       },
       system:
-        'あなたは1日分の旅行旅程を構造化 PlanDay として組み立てる専門家です。妥当な startTime を付けた4〜7件の、現実的で順序立てた予定（観光スポット・食事・移動など）を必ず作成してください。1日あたり最低でも3件以上の観光スポット（`type="spot"`）を必ず含めてください。優先順位は次の通りです: (1) ツールデータにある実在の名称・住所を最優先で使う。(2) ツールデータが不足している場合は、目的地に実在するよく知られた観光スポット・飲食店・名所をあなたの知識から補う。架空の場所を作ってはいけませんが、items を空にすることは絶対に禁止です——必ず具体的な予定で埋めてください。各 item には `description`（日本語1〜2文の詳細説明）を必ず付け、しおりの読者向けに「そこで何をするか」「見どころ・名物」を具体的に書くこと（タイトルの言い換えや空文字は不可）。前日までに訪問済みのスポット・飲食店は再訪・重複させず、前日の最終地点・宿泊地から自然につながる動線にし、旅行全体の予算を意識すること。スキーマや検証に関するメタ的な文言をどのフィールドにも書かないこと。出力（title・description・各 item の名称など、すべての自然言語フィールド）は必ず日本語で記述してください。`title` は『N日目』のような短いラベルにしてください。',
+        'あなたは1日分の旅行旅程を構造化 PlanDay として組み立てる専門家です。妥当な startTime を付けた4〜7件の、現実的で順序立てた予定（観光スポット・食事・移動など）を必ず作成してください。1日あたり最低でも3件以上の観光スポット（`type="spot"`）を必ず含めてください。優先順位は次の通りです: (1) ツールデータにある実在の名称・住所を最優先で使う。(2) ツールデータが不足している場合は、目的地に実在するよく知られた観光スポット・飲食店・名所をあなたの知識から補う。架空の場所を作ってはいけませんが、items を空にすることは絶対に禁止です——必ず具体的な予定で埋めてください。各 item には `description`（日本語1〜2文の詳細説明）を必ず付け、しおりの読者向けに「そこで何をするか」「見どころ・名物」を具体的に書くこと（タイトルの言い換えや空文字は不可）。しおりに写真を載せる価値の高さを `imagePriority`（1=ぜひ載せたい、2=体験等、3=なくてもよい。観光名所は原則1、体験は2、その他は基本つけない）として各 item に設定すること。前日までに訪問済みのスポット・飲食店は再訪・重複させず、前日の最終地点・宿泊地から自然につながる動線にし、旅行全体の予算を意識すること。スキーマや検証に関するメタ的な文言をどのフィールドにも書かないこと。出力（title・description・各 item の名称など、すべての自然言語フィールド）は必ず日本語で記述してください。`title` は『N日目』のような短いラベルにしてください。',
       prompt: `対象は ${n}日目です。\n\n旅行のコンテキスト:\n${contextBlock}\n\nこれまでに確定した日程（重複させない／動線をつなぐ）:\n${priorBlock}\n\nプランナーのメモ:\n${plannerText || "(なし)"}\n\nツールで収集したデータ:\n${dataBlock}`,
     });
     // 生成スキーマ（フラット）→ 保存スキーマ（union）。type により union のいずれかを

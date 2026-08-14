@@ -272,6 +272,26 @@ describe("chat/edit sanitizeGeneratedDay", () => {
 
     expect(day.items[0]?.image).toBeUndefined();
   });
+
+  it("モデルが出力した imagePriority を除去する（保存・クライアントへの漏れ防止）", () => {
+    const day = sanitizeGeneratedDay(
+      {
+        dayNumber: 1,
+        items: [
+          {
+            id: "i1",
+            type: "spot",
+            title: "首里城",
+            description: "琉球王国の王城跡を巡ります。",
+            imagePriority: 1,
+          },
+        ],
+      },
+      1,
+    );
+
+    expect("imagePriority" in day.items[0]!).toBe(false);
+  });
 });
 
 describe("chat/edit isDegenerateDay", () => {

@@ -142,7 +142,18 @@ export async function generateItemImage(
     return { url: `${base}/assets/${key}`, r2Key: key, prompt: subject };
   } catch (error) {
     abortSignal?.throwIfAborted();
-    console.error("[generateItemImage] Error:", error);
+    const isRateLimit =
+      (error as { status?: number })?.status === 429 ||
+      String(error).includes("429") ||
+      String(error).includes("RESOURCE_EXHAUSTED");
+    if (isRateLimit) {
+      console.warn(
+        `[generateItemImage] レート制限 (429 / RESOURCE_EXHAUSTED) を検知しました (${subject}):`,
+        error,
+      );
+    } else {
+      console.error("[generateItemImage] Error:", error);
+    }
     return null;
   }
 }

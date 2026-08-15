@@ -6,6 +6,7 @@ import { generateItemImage } from "../tools/generate-image";
 import { createUsageCounter } from "./judgement";
 import {
   generateImagesForRepairedDays,
+  type ImageAttemptBudget,
   imageBudgetForDay,
   imageSubject,
   MAX_GENERATED_IMAGES_PER_PLAN,
@@ -326,6 +327,46 @@ describe("runDay の障害耐性", () => {
     expect(result.day.items).toHaveLength(4);
     expect(result.day.items[0]?.image).toBeUndefined();
     expect(result.day.items[1]?.image?.url).toBe("https://api.test/assets/x.png");
+  });
+
+  it("失敗した画像生成も試行枠を消費し、日を跨いだ呼び出し総数を6件に制限する", async () => {
+    const denseDay = {
+      dayNumber: 1,
+      title: "1日目",
+      items: [
+        { id: "s1", type: "spot", title: "清水寺", description: "古刹を参拝します。" },
+        { id: "s2", type: "spot", title: "金閣寺", description: "舎利殿を眺めます。" },
+        { id: "s3", type: "spot", title: "銀閣寺", description: "庭園を散策します。" },
+        { id: "m1", type: "meal", title: "昼食", description: "京料理をいただきます。" },
+        { id: "t1", type: "transport", title: "移動", description: "バスで移動します。" },
+        { id: "l1", type: "lodging", title: "宿泊", description: "市内の宿に泊まります。" },
+      ],
+    };
+    vi.mocked(streamText).mockImplementation(() => streamOf([]) as never);
+    vi.mocked(generateObject).mockResolvedValue({ object: denseDay } as never);
+    vi.mocked(generateItemImage).mockResolvedValue(null);
+
+    const attemptBudget: ImageAttemptBudget = { remaining: MAX_GENERATED_IMAGES_PER_PLAN };
+    let currentPlan = { ...plan, nights: 2, days: [] as PlanDay[] };
+
+    for (let dayNumber = 1; dayNumber <= 3; dayNumber++) {
+      const result = await runDay(
+        {} as never,
+        makeCtx(),
+        currentPlan,
+        dayNumber,
+        undefined,
+        undefined,
+        attemptBudget,
+      );
+      expect(result.status).toBe("ok");
+      if (result.status !== "ok") return;
+      currentPlan = { ...currentPlan, days: [...currentPlan.days, result.day] };
+    }
+
+    // 旧実装は成功画像だけを数え、全失敗時に 2 + 3 + 3 = 8 件を再発行していた。
+    expect(generateItemImage).toHaveBeenCalledTimes(MAX_GENERATED_IMAGES_PER_PLAN);
+    expect(attemptBudget.remaining).toBe(0);
   });
 
   it("fullStream が例外を投げても日を失わず、構造化経路で復旧する", async () => {

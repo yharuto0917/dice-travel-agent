@@ -127,6 +127,7 @@ describe("AgentStateSchema", () => {
     expect(s.phase).toBe("idle");
     expect(s.questions).toEqual([]);
     expect(s.progress).toBe(0);
+    expect(s.imageGenerationAttempts).toBe(0);
   });
 });
 

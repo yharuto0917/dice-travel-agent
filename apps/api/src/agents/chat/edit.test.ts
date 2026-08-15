@@ -1,6 +1,7 @@
 import type { PlanDay, TravelPlan } from "@repo/shared";
 import { describe, expect, it } from "vitest";
 import {
+  applyImagePriorities,
   buildPendingEdit,
   buildResearchNotes,
   carryOverImages,
@@ -10,6 +11,7 @@ import {
   isDegenerateDay,
   mergeEditedDay,
   normalizeStartTime,
+  remainingEditImageBudget,
   resolveTargetDays,
   sanitizeGeneratedDay,
 } from "./edit";
@@ -291,6 +293,65 @@ describe("chat/edit sanitizeGeneratedDay", () => {
     );
 
     expect("imagePriority" in day.items[0]!).toBe(false);
+  });
+});
+
+describe("chat/edit applyImagePriorities", () => {
+  const items: PlanDay["items"] = [
+    { id: "i1", type: "spot", title: "首里城" },
+    { id: "i2", type: "meal", title: "沖縄そば" },
+    { id: "i3", type: "spot", title: "美ら海水族館" },
+  ];
+
+  it("id が一致する item に Agent の優先度を戻す", () => {
+    const applied = applyImagePriorities(items, new Map([["i2", 1]]));
+    expect(applied[1]?.imagePriority).toBe(1);
+  });
+
+  it("優先度が無い item は元のまま返す（type 由来の既定値へフォールバックさせる）", () => {
+    const applied = applyImagePriorities(items, new Map([["i2", 1]]));
+    expect(applied[0]).toBe(items[0]);
+    expect("imagePriority" in applied[0]!).toBe(false);
+  });
+
+  it("元の配列と item を破壊しない", () => {
+    const applied = applyImagePriorities(items, new Map([["i1", 3]]));
+    expect(applied).not.toBe(items);
+    expect("imagePriority" in items[0]!).toBe(false);
+  });
+
+  it("空の Map なら全 item がそのまま", () => {
+    const applied = applyImagePriorities(items, new Map());
+    expect(applied.every((item, i) => item === items[i])).toBe(true);
+  });
+});
+
+describe("chat/edit remainingEditImageBudget", () => {
+  const withGeneratedImages = (count: number): TravelPlan => ({
+    ...plan,
+    days: [
+      {
+        dayNumber: 1,
+        items: Array.from({ length: count }, (_, index) => ({
+          id: `generated-${index}`,
+          type: "spot" as const,
+          title: `観光地${index}`,
+          image: { url: `https://example.com/${index}.png`, generated: true },
+        })),
+      },
+    ],
+  });
+
+  it("計画に生成画像が無ければ編集上限の2枚を返す", () => {
+    expect(remainingEditImageBudget(withGeneratedImages(0))).toBe(2);
+  });
+
+  it("計画全体の残枠が1枚なら1枚に制限する", () => {
+    expect(remainingEditImageBudget(withGeneratedImages(5))).toBe(1);
+  });
+
+  it("計画全体で6枚使用済みなら新規生成を止める", () => {
+    expect(remainingEditImageBudget(withGeneratedImages(6))).toBe(0);
   });
 });
 

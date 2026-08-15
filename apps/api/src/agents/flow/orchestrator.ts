@@ -51,6 +51,17 @@ export type TimelineInput = {
 };
 export type TimelineCallback = (event: TimelineInput) => void;
 
+/**
+ * 1回の計画生成で使える画像生成試行枠。
+ *
+ * `remaining` は成功画像数ではなく、失敗を含む API 呼び出しの残枠。Agent 側は
+ * `onConsume` で予約数を Durable Object state へ保存し、日を跨いだ再発行を防ぐ。
+ */
+export interface ImageAttemptBudget {
+  remaining: number;
+  onConsume?: (count: number) => void;
+}
+
 /** サブエージェントのツール名（タイムライン上で kind="subagent" として可視化する）。 */
 const SUBAGENT_NAMES = new Set(["research", "enhancement", "factcheck", "summarize"]);
 
@@ -161,11 +172,15 @@ export function imageBudgetForDay(
   plan: TravelPlanDraft,
   dayNumber: number,
   dayItemCount: number,
+  remainingAttemptBudget: number = remainingImageBudget(plan),
 ): number {
   const totalDays =
     plan.nights !== undefined && plan.nights >= 0 ? plan.nights + 1 : plan.days?.length || 1;
   const remainingDays = Math.max(1, totalDays - dayNumber + 1);
-  const remBudget = remainingImageBudget(plan);
+  const attemptBudget = Number.isFinite(remainingAttemptBudget)
+    ? Math.max(0, Math.floor(remainingAttemptBudget))
+    : 0;
+  const remBudget = Math.min(remainingImageBudget(plan), attemptBudget);
   if (remBudget <= 0 || dayItemCount <= 0) return 0;
 
   const fairShare = Math.ceil(remBudget / remainingDays);
@@ -227,9 +242,15 @@ async function generateDayImages(
   day: PlanDay,
   onActivity?: ActivityCallback,
   onEvent?: TimelineCallback,
+  imageAttemptBudget?: ImageAttemptBudget,
 ): Promise<PlanDay> {
   try {
-    const budget = imageBudgetForDay(plan, day.dayNumber, day.items.length);
+    const budget = imageBudgetForDay(
+      plan,
+      day.dayNumber,
+      day.items.length,
+      imageAttemptBudget?.remaining,
+    );
     const targets = selectImageTargets(day.items, budget);
     if (targets.length === 0) {
       // 対象がない場合も items から imagePriority を確実に落とす
@@ -245,6 +266,13 @@ async function generateDayImages(
     onActivity?.("風景画像を生成しています…");
     // setup ステップで title は "${目的地}の旅" 形式。末尾の "の旅" を落として目的地名を得る。
     const destinationName = plan.title?.replace(/の旅$/, "").trim() || null;
+
+    // API 呼び出しの直前に枠を予約する。成功画像だけを数えると、失敗した枠が後日に
+    // 再発行され、計画全体の最大6試行を超えるため、失敗も消費として永続化する。
+    if (imageAttemptBudget) {
+      imageAttemptBudget.remaining = Math.max(0, imageAttemptBudget.remaining - targets.length);
+      imageAttemptBudget.onConsume?.(targets.length);
+    }
 
     const settled = await mapWithConcurrency(targets, IMAGE_CONCURRENCY, (t) =>
       generateItemImage(env, imageSubject(t.item, destinationName)),
@@ -296,15 +324,25 @@ export async function generateImagesForRepairedDays(
   before: TravelPlanDraft,
   after: TravelPlanDraft,
   onActivity?: ActivityCallback,
+  imageAttemptBudget?: ImageAttemptBudget,
 ): Promise<TravelPlanDraft> {
   const beforeDays = before.days ?? [];
   const days = [...(after.days ?? [])];
+  // 単体利用時も修復日間で同じ枠を共有する。本番では Agent state と接続された枠が渡る。
+  const attempts = imageAttemptBudget ?? { remaining: remainingImageBudget(after) };
 
   for (let index = 0; index < days.length; index++) {
     const previousDay = beforeDays[index];
     const repairedDay = days[index];
     if (!previousDay || previousDay.items.length > 0 || !repairedDay?.items.length) continue;
-    days[index] = await generateDayImages(env, { ...after, days }, repairedDay, onActivity);
+    days[index] = await generateDayImages(
+      env,
+      { ...after, days },
+      repairedDay,
+      onActivity,
+      undefined,
+      attempts,
+    );
   }
 
   return { ...after, days };
@@ -336,6 +374,7 @@ export async function runDay(
   n: number,
   onActivity?: ActivityCallback,
   onEvent?: TimelineCallback,
+  imageAttemptBudget?: ImageAttemptBudget,
 ): Promise<RunDayResult> {
   let finalizedDay: PlanDay | null = null;
 
@@ -583,7 +622,14 @@ export async function runDay(
   // 全経路（finalizeDay 採用・構造化・フォールバック）に共通で適用する単一の出口。
   let dayWithImages = day;
   try {
-    dayWithImages = await generateDayImages(env, plan, day, onActivity, onEvent);
+    dayWithImages = await generateDayImages(
+      env,
+      plan,
+      day,
+      onActivity,
+      onEvent,
+      imageAttemptBudget,
+    );
   } catch (err) {
     console.error(`[runDay] Failed to generate images for day ${n}:`, err);
     dayWithImages = day;
@@ -646,7 +692,7 @@ async function structureDay(
         } satisfies GoogleGenerativeAIProviderOptions,
       },
       system:
-        'あなたは1日分の旅行旅程を構造化 PlanDay として組み立てる専門家です。妥当な startTime を付けた4〜7件の、現実的で順序立てた予定（観光スポット・食事・移動など）を必ず作成してください。1日あたり最低でも3件以上の観光スポット（`type="spot"`）を必ず含めてください。優先順位は次の通りです: (1) ツールデータにある実在の名称・住所を最優先で使う。(2) ツールデータが不足している場合は、目的地に実在するよく知られた観光スポット・飲食店・名所をあなたの知識から補う。架空の場所を作ってはいけませんが、items を空にすることは絶対に禁止です——必ず具体的な予定で埋めてください。各 item には `description`（日本語1〜2文の詳細説明）を必ず付け、しおりの読者向けに「そこで何をするか」「見どころ・名物」を具体的に書くこと（タイトルの言い換えや空文字は不可）。しおりに写真を載せる価値の高さを `imagePriority`（1=ぜひ載せたい、2=体験等、3=なくてもよい。観光名所は原則1、体験は2、その他は基本つけない）として各 item に設定すること。前日までに訪問済みのスポット・飲食店は再訪・重複させず、前日の最終地点・宿泊地から自然につながる動線にし、旅行全体の予算を意識すること。スキーマや検証に関するメタ的な文言をどのフィールドにも書かないこと。出力（title・description・各 item の名称など、すべての自然言語フィールド）は必ず日本語で記述してください。`title` は『N日目』のような短いラベルにしてください。',
+        'あなたは1日分の旅行旅程を構造化 PlanDay として組み立てる専門家です。妥当な startTime を付けた4〜7件の、現実的で順序立てた予定（観光スポット・食事・移動など）を必ず作成してください。1日あたり最低でも3件以上の観光スポット（`type="spot"`）を必ず含めてください。優先順位は次の通りです: (1) ツールデータにある実在の名称・住所を最優先で使う。(2) ツールデータが不足している場合は、目的地に実在するよく知られた観光スポット・飲食店・名所をあなたの知識から補う。架空の場所を作ってはいけませんが、items を空にすることは絶対に禁止です——必ず具体的な予定で埋めてください。各 item には `description`（日本語1〜2文の詳細説明）を必ず付け、しおりの読者向けに「そこで何をするか」「見どころ・名物」を具体的に書くこと（タイトルの言い換えや空文字は不可）。写真を載せたい項目にだけ `imagePriority` を付けること（1=ぜひ載せたい、2=あれば良い、3=なくてもよい）。観光名所は原則1、体験は2。食事・移動・宿泊・自由時間など写真が不要な項目には設定しないこと（全項目に付けてはいけない）。前日までに訪問済みのスポット・飲食店は再訪・重複させず、前日の最終地点・宿泊地から自然につながる動線にし、旅行全体の予算を意識すること。スキーマや検証に関するメタ的な文言をどのフィールドにも書かないこと。出力（title・description・各 item の名称など、すべての自然言語フィールド）は必ず日本語で記述してください。`title` は『N日目』のような短いラベルにしてください。',
       prompt: `対象は ${n}日目です。\n\n旅行のコンテキスト:\n${contextBlock}\n\nこれまでに確定した日程（重複させない／動線をつなぐ）:\n${priorBlock}\n\nプランナーのメモ:\n${plannerText || "(なし)"}\n\nツールで収集したデータ:\n${dataBlock}`,
     });
     // 生成スキーマ（フラット）→ 保存スキーマ（union）。type により union のいずれかを

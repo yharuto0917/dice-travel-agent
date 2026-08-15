@@ -16,7 +16,13 @@ import type { Bindings } from "../env";
 import { persistPlanRevision } from "./chat/plan-persistence";
 import { createUsageCounter, HITL_TIMEOUT_SEC } from "./flow/judgement";
 import { dayCountOf, mergeDay, nightsOf } from "./flow/merge";
-import { generateImagesForRepairedDays, runDay, type TimelineInput } from "./flow/orchestrator";
+import {
+  generateImagesForRepairedDays,
+  type ImageAttemptBudget,
+  MAX_GENERATED_IMAGES_PER_PLAN,
+  runDay,
+  type TimelineInput,
+} from "./flow/orchestrator";
 import { planPersistenceStatus } from "./flow/plan-status";
 import { buildStepPlan } from "./flow/step-plan";
 import {
@@ -75,6 +81,7 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
       phase: "understanding",
       progress: 0,
       error: null,
+      imageGenerationAttempts: 0,
       timeline: [],
     });
     this.pushTimeline({ kind: "phase", label: "プラン生成を開始しました" });
@@ -205,6 +212,7 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
         n,
         (status, thought) => this.setActivity(status, thought ?? null),
         (ev) => this.pushTimeline(ev, n),
+        this.createImageAttemptBudget(),
       );
 
       // 計画担当が humanInTheLoop を呼んだら、当日を確定せず回答待ちで保留する。
@@ -312,6 +320,7 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
           candidate,
           repaired,
           (status, thought) => this.setActivity(status, thought ?? null),
+          this.createImageAttemptBudget(),
         );
       }
 
@@ -384,6 +393,27 @@ export class TravelPlanningAgent extends Agent<Bindings, AgentState> {
   private setActivity(status: string, thought: string | null = null): void {
     if (this.state.activity === status && this.state.thought === thought) return;
     this.setState({ ...this.state, activity: status, thought });
+  }
+
+  /** 失敗も含む画像生成試行数を DO state へ予約し、全日合計を6回以内に保つ。 */
+  private createImageAttemptBudget(): ImageAttemptBudget {
+    const consumed = Math.min(
+      MAX_GENERATED_IMAGES_PER_PLAN,
+      Math.max(0, this.state.imageGenerationAttempts ?? 0),
+    );
+    return {
+      remaining: MAX_GENERATED_IMAGES_PER_PLAN - consumed,
+      onConsume: (count) => {
+        if (count <= 0) return;
+        const current = Math.min(
+          MAX_GENERATED_IMAGES_PER_PLAN,
+          Math.max(0, this.state.imageGenerationAttempts ?? 0),
+        );
+        const next = Math.min(MAX_GENERATED_IMAGES_PER_PLAN, current + count);
+        if (next === current) return;
+        this.setState({ ...this.state, imageGenerationAttempts: next });
+      },
+    };
   }
 
   /**

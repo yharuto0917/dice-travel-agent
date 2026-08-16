@@ -74,6 +74,8 @@ export const AgentStateSchema = z.object({
   phase: AgentPhaseSchema.default("idle"),
   /** 段階的に充填される計画下書き */
   plan: TravelPlanDraftSchema.default({}),
+  /** 現在の生成実行で予約済みの画像生成試行数（失敗した呼び出しも含む、内部用途）。 */
+  imageGenerationAttempts: z.number().int().min(0).default(0),
   /** HITL 質問キュー */
   questions: z.array(HitlQuestionSchema).default([]),
   /** 充填済みセクション名（"days" 等） */

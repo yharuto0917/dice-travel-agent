@@ -14,7 +14,7 @@ export function CoverPage({ plan }: CoverPageProps) {
   const attribution = displayImage?.attribution;
 
   return (
-    <div className="flex flex-col w-full p-6 sm:p-10 relative">
+    <div className="flex flex-col w-full p-6 sm:p-10 relative print:break-after-page print:p-4">
       <div className="flex-1 flex flex-col items-center justify-center text-center gap-8 pl-6">
         {displayImage?.url ? (
           <div className="w-full flex flex-col gap-2">
@@ -28,7 +28,7 @@ export function CoverPage({ plan }: CoverPageProps) {
             {attribution ? (
               <div className="text-[10px] text-muted text-right pr-1">
                 Photo by{" "}
-                {attribution.url && attribution.url.startsWith("http") ? (
+                {attribution.url?.startsWith("http") ? (
                   <a
                     href={attribution.url}
                     target="_blank"

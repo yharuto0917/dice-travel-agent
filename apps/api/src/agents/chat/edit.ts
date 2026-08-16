@@ -15,7 +15,7 @@ import { z } from "zod";
 import type { Bindings } from "../../env";
 import { shouldStopUsageLimit } from "../flow/judgement";
 import { mergeDay } from "../flow/merge";
-import { imageSubject, selectImageTargets } from "../flow/orchestrator";
+import { imageSubject, remainingImageBudget, selectImageTargets } from "../flow/orchestrator";
 import { createLlm, SUBAGENT_MODEL_ID, SUPERVISOR_MODEL_ID } from "../llm/provider";
 import { buildTools } from "../tools";
 import type { GeneratedImage, ToolContext } from "../tools/context";
@@ -47,7 +47,7 @@ const EDIT_FIX_ATTEMPTS = 1;
 /**
  * 1回の修正で**新しく生成する**画像の上限。
  *
- * 計画生成（`flow/orchestrator.ts` の `MAX_IMAGES_PER_DAY` = 6枚/日）と違い、修正は
+ * 計画生成（`flow/orchestrator.ts` の `MAX_GENERATED_IMAGES_PER_PLAN` = 6枚/計画）と違い、修正は
  * チャットの応答待ち時間に直結する。画像1枚あたり「英語プロンプト生成 + 画像生成」の
  * 2回のモデル呼び出しがかかるため、待ち時間とコストの上限としてここで絞る。
  * 据え置かれた予定の画像は {@link carryOverImages} が引き継ぐので、この枠は消費しない。
@@ -346,7 +346,7 @@ export function sanitizeGeneratedDay(
   const sanitized = {
     ...day,
     dayNumber,
-    items: day.items.map(({ image: _image, ...item }) => ({
+    items: day.items.map(({ image: _image, imagePriority: _imagePriority, ...item }) => ({
       ...item,
       title: clampText(item.title, MAX_TITLE_LEN) ?? item.title,
       description: clampText(item.description, MAX_DESC_LEN),
@@ -586,6 +586,11 @@ async function researchDay(
  *
  * 思考は `generateObject` が一括で返すため、下調べのようにストリームでは流せない。
  * 成功した試行の分だけを終わったあとに流す（失敗した試行の思考は混ぜない）。
+ *
+ * 戻り値に `priorities`（item.id → `imagePriority`）を添える。この値は Agent が
+ * 「どこに写真を載せたいか」を示す唯一の手がかりだが、`sanitizeGeneratedDay` と
+ * `checkPlan`（保存スキーマは `imagePriority` を持たない）の両方で確実に落ちるため、
+ * 計画オブジェクトに載せたままでは画像生成まで届かない。id で持ち回す。
  */
 async function generateDay(
   env: Bindings,
@@ -596,7 +601,7 @@ async function generateDay(
   notes: string | null,
   reasoning: ReasoningReporter,
   abortSignal?: AbortSignal,
-): Promise<PlanDay | null> {
+): Promise<{ day: PlanDay; priorities: Map<string, number> } | null> {
   for (const { modelId, temperature } of EDIT_DAY_ATTEMPTS) {
     try {
       abortSignal?.throwIfAborted();
@@ -622,10 +627,15 @@ async function generateDay(
         reasoning.append(thought);
         reasoning.flush();
       }
+      // サニタイズが `imagePriority` を落とす前に、id 付きで控えておく。
+      const priorities = new Map<string, number>();
+      for (const item of object.items) {
+        if (item.imagePriority !== undefined) priorities.set(item.id, item.imagePriority);
+      }
       const generated = sanitizeGeneratedDay(object, dayNumber);
       // 同じ予定の繰り返しで水増しされた日は採用せず、次の条件で作り直す。
       if (isDegenerateDay(generated)) continue;
-      return generated;
+      return { day: generated, priorities };
     } catch {
       abortSignal?.throwIfAborted();
       // 次の温度で作り直す。全滅した場合だけ諦める。
@@ -635,11 +645,34 @@ async function generateDay(
 }
 
 /**
- * 修正で新しく増えた観光スポットへ風景画像を生成・添付する（#18 の生成経路と同じ方式）。
+ * Agent が示した掲載優先度（item.id → `imagePriority`）を items へ戻す。
  *
- * 計画生成では1日あたり最大6枚まで作るが、チャットの修正は会話の待ち時間に直結するため
+ * `imagePriority` は生成用スキーマにしか無く、`sanitizeGeneratedDay` と `checkPlan` の
+ * 両方で確実に落ちる。画像の対象選定の直前にここで載せ直すことで、Agent の判断を
+ * 修正経路でも効かせる。優先度が無い item はそのまま返し、`selectImageTargets` 側の
+ * type 由来の既定値（spot: 1, activity: 2）へフォールバックさせる。
+ */
+export function applyImagePriorities(
+  items: PlanItem[],
+  priorities: Map<string, number>,
+): (PlanItem & { imagePriority?: number })[] {
+  return items.map((item) => {
+    const priority = priorities.get(item.id);
+    return priority === undefined ? item : { ...item, imagePriority: priority };
+  });
+}
+
+/** チャット修正で新規生成できる画像数を、応答時間上限と計画全体の残枠の小さい方へ絞る。 */
+export function remainingEditImageBudget(plan: TravelPlanDraft): number {
+  return Math.min(MAX_EDIT_IMAGES, remainingImageBudget(plan));
+}
+
+/**
+ * 修正で新しく増えた画像対象へ風景画像を生成・添付する（#18 の生成経路と同じ方式）。
+ *
+ * 計画全体の6枚上限に加え、チャットの修正は会話の待ち時間に直結するため
  * **修正1回あたり {@link MAX_EDIT_IMAGES} 枚**に絞る。枠は対象日の若い順に配り、
- * 使い切ったらそれ以降の日は画像なしのままにする（次の修正でまた枠が復活する）。
+ * 使い切ったらそれ以降の日は画像なしのままにする。
  *
  * 画像生成の失敗は提案そのものを壊さない。1枚失敗しても他の枚数と修正案は生かす。
  */
@@ -648,20 +681,25 @@ async function generateEditImages(
   plan: TravelPlan,
   draft: TravelPlanDraft,
   dayNumbers: number[],
+  imagePriorities: Map<string, number>,
   onActivity?: (label: string) => void,
   abortSignal?: AbortSignal,
 ): Promise<{ draft: TravelPlanDraft; generatedImageKeys: string[] }> {
   const days = draft.days ?? [];
   abortSignal?.throwIfAborted();
+  const totalBudget = remainingEditImageBudget(draft);
 
   // 対象日を順に見て、画像の無い観光スポットを枠が尽きるまで拾う。
   const picks: { dayNumber: number; index: number; item: PlanItem }[] = [];
   for (const dayNumber of dayNumbers) {
-    const remaining = MAX_EDIT_IMAGES - picks.length;
+    const remaining = totalBudget - picks.length;
     if (remaining <= 0) break;
     const day = days.find((d) => d.dayNumber === dayNumber);
     if (!day) continue;
-    for (const target of selectImageTargets(day.items, remaining)) {
+    for (const target of selectImageTargets(
+      applyImagePriorities(day.items, imagePriorities),
+      remaining,
+    )) {
       picks.push({ dayNumber, index: target.index, item: target.item });
     }
   }
@@ -738,6 +776,10 @@ export async function createPlanEdit(
   // 思考は対象日をまたいで1本の流れとして見せる（日ごとに見出しで区切る）。
   const reasoning = createReasoningReporter(onReasoning);
 
+  // Agent が付けた掲載優先度（item.id → imagePriority）。計画オブジェクトへ載せると
+  // sanitize と checkPlan で落ちてしまうため、画像生成まで別経路で持ち回す。
+  const imagePriorities = new Map<string, number>();
+
   // 対象日は前の日の結果を踏まえて順に作る（動線・重複の整合を保つため並列にしない）。
   let draft: TravelPlanDraft = plan;
   for (const dayNumber of targets) {
@@ -754,7 +796,7 @@ export async function createPlanEdit(
       onActivity,
       abortSignal,
     );
-    const day = await generateDay(
+    const generated = await generateDay(
       env,
       plan,
       draft,
@@ -764,11 +806,13 @@ export async function createPlanEdit(
       reasoning,
       abortSignal,
     );
-    if (!day) return { status: "failed", reason: "generation_failed" };
+    if (!generated) return { status: "failed", reason: "generation_failed" };
+    // Agent が示した掲載優先度を日をまたいで集約する（画像生成の対象選定で使う）。
+    for (const [itemId, priority] of generated.priorities) imagePriorities.set(itemId, priority);
     // 据え置かれた予定の画像を戻してから合成する。新規生成の枠は、これで画像が
     // 付かなかった＝本当に増えた観光スポットだけに使う。
     const previous = draft.days?.find((d) => d.dayNumber === dayNumber);
-    draft = mergeEditedDay(draft, carryOverImages(previous, day));
+    draft = mergeEditedDay(draft, carryOverImages(previous, generated.day));
   }
 
   // 画像を作る前に計画本体を検証する。不採用の計画のために R2 object を作らない。
@@ -792,6 +836,7 @@ export async function createPlanEdit(
       plan,
       proposed,
       targets,
+      imagePriorities,
       onActivity,
       abortSignal,
     );

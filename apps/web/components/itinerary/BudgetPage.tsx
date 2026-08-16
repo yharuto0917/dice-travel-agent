@@ -6,7 +6,7 @@ interface BudgetPageProps {
 
 export function BudgetPage({ budget }: BudgetPageProps) {
   return (
-    <div className="w-full flex flex-col p-6 sm:p-10 relative">
+    <div className="w-full flex flex-col p-6 sm:p-10 relative print:break-inside-avoid print:p-4">
       <div className="flex-1 pl-8 pr-2 pt-4 select-none leading-[32px] text-sm relative z-10">
         <h2 className="text-xl font-extrabold mb-8 text-ink inline-block pr-4">旅の予算メモ</h2>
 

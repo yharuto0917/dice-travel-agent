@@ -10,6 +10,7 @@ import { TravelChat } from "@/components/chat/travel-chat";
 import { BudgetPage } from "@/components/itinerary/BudgetPage";
 import { CoverPage } from "@/components/itinerary/CoverPage";
 import { DayPage } from "@/components/itinerary/DayPage";
+import { PrintButton } from "@/components/itinerary/print-button";
 import { AppShell } from "@/components/layout/app-shell";
 import { getPlan } from "@/lib/api";
 import { clearChatAccess, loadChatAccess } from "@/lib/chat-access-token";
@@ -88,15 +89,22 @@ function ItineraryInner({ planId }: { planId: string }) {
   const chatReady = state.data.status === "completed" && plan !== null;
 
   return (
-    <AppShell title="旅のしおり" back={{ href: "/" }}>
-      <div className="w-full max-w-3xl mx-auto py-6 sm:py-10 px-2 sm:px-4">
-        <div className="bg-paper border-y-2 border-line sm:border-2 sm:rounded-3xl shadow-toy-lg relative overflow-hidden flex flex-col">
+    <AppShell
+      title="旅のしおり"
+      back={{ href: "/" }}
+      trailing={plan ? <PrintButton planTitle={plan.title} /> : null}
+    >
+      <div className="w-full max-w-3xl mx-auto py-6 sm:py-10 px-2 sm:px-4 print:max-w-none print:p-0">
+        <div
+          id="itinerary-print-root"
+          className="bg-paper border-y-2 border-line sm:border-2 sm:rounded-3xl shadow-toy-lg relative overflow-hidden flex flex-col print:border-none print:shadow-none print:rounded-none print:overflow-visible print:bg-transparent"
+        >
           {/* Red vertical margin line for the whole notebook */}
-          <div className="absolute left-6 md:left-10 top-0 bottom-0 w-[2px] bg-[var(--margin-line)] z-0 pointer-events-none" />
+          <div className="absolute left-6 md:left-10 top-0 bottom-0 w-[2px] bg-[var(--margin-line)] z-0 pointer-events-none print:hidden" />
 
           {/* Lined paper background pattern */}
           <div
-            className="absolute inset-0 pointer-events-none z-0 opacity-50"
+            className="absolute inset-0 pointer-events-none z-0 opacity-50 print:hidden"
             style={{
               backgroundImage:
                 "repeating-linear-gradient(transparent, transparent 31px, var(--color-line) 31px, var(--color-line) 32px)",
@@ -106,11 +114,14 @@ function ItineraryInner({ planId }: { planId: string }) {
           />
 
           {/* Masking tape on top to look attached to a board */}
-          <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-48 h-10 masking-tape rotate-[-1deg] z-20" />
+          {/* 印刷時は print:overflow-visible でクリップが外れ、はみ出した分まで刷られてしまうので隠す */}
+          <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-48 h-10 masking-tape rotate-[-1deg] z-20 print:hidden" />
 
           <div className="relative z-10 flex flex-col">
             {plan ? (
-              <div className="pb-10 border-b-2 border-dashed border-line/20">
+              // CoverPage 側の print:break-after-page はこのラッパーの内側で改ページするため、
+              // 下余白と破線だけが次ページ先頭に残る。印刷時は両方を落としておく。
+              <div className="pb-10 border-b-2 border-dashed border-line/20 print:pb-0 print:border-b-0">
                 <CoverPage plan={plan} />
               </div>
             ) : null}

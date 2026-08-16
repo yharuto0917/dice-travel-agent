@@ -54,7 +54,7 @@ export function ChatAccessGate({
   );
 
   return (
-    <Card className="mt-4">
+    <Card className="mt-4 print:hidden">
       <CardBody className="flex flex-col items-center gap-3 text-center">
         <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-surface-2 text-primary">
           <ShieldCheck size={24} weight="duotone" />

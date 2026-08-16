@@ -120,3 +120,26 @@
   }
 }
 
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  .app-frame {
+    max-width: none !important;
+    min-height: 0 !important;
+  }
+
+  html {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  body {
+    background-color: #ffffff !important;
+    background-image: none !important;
+  }
+}
+
+

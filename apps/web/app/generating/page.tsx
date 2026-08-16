@@ -59,17 +59,22 @@ function GeneratingInner({ planId }: { planId: string }) {
   const pendingQuestions = (state?.questions ?? []).filter((q) => q.status === "pending");
   const isDone = phase === "done";
   const isError = phase === "error";
+  // 一部の日が空でも API は draft として保存済みで、しおり自体は開ける。
+  // 予定が1日でも入っていれば「見る」導線を残す（生成し直さずに済ませられるように）。
+  const hasViewablePlan = (plan?.days ?? []).some((d) => d.items.length > 0);
+  const canOpenItinerary = isDone || (isError && hasViewablePlan);
 
-  // 生成成功時に、Home 画面の作成履歴として Cookie へ1件だけ記録する（#57）。
+  // しおりを開ける状態になったら、Home 画面の作成履歴として Cookie へ1件だけ記録する（#57）。
+  // 一部未完成でも保存はされているため、履歴から辿れないと事実上失われてしまう。
   useEffect(() => {
-    if (!isDone || savedRef.current) return;
+    if (!canOpenItinerary || savedRef.current) return;
     savedRef.current = true;
     addHistoryEntry({
       id: planId,
       title: plan?.title ?? "無題の旅",
       createdAt: new Date().toISOString(),
     });
-  }, [isDone, plan?.title, planId]);
+  }, [canOpenItinerary, plan?.title, planId]);
 
   return (
     <AppShell title="計画作成中" back={{ href: "/conditions" }}>
@@ -176,16 +181,17 @@ function GeneratingInner({ planId }: { planId: string }) {
         {plan ? <PlanPreview plan={plan} /> : null}
 
         {/* 完了 / エラー時のアクション */}
-        <div className="mt-auto pt-8">
-          {isDone ? (
+        <div className="mt-auto flex flex-col gap-2 pt-8">
+          {canOpenItinerary ? (
             <Link
               href={`/itinerary?planId=${planId}`}
               className={cn(buttonVariants({ size: "lg" }), "w-full")}
             >
-              旅のしおりを見る
+              {isDone ? "旅のしおりを見る" : "作成できた分のしおりを見る"}
               <ArrowRight size={18} weight="bold" />
             </Link>
-          ) : isError ? (
+          ) : null}
+          {isError ? (
             <Button
               size="lg"
               variant="outline"

@@ -127,6 +127,7 @@ describe("AgentStateSchema", () => {
     expect(s.phase).toBe("idle");
     expect(s.questions).toEqual([]);
     expect(s.progress).toBe(0);
+    expect(s.imageGenerationAttempts).toBe(0);
   });
 });
 
@@ -219,6 +220,53 @@ describe("ChatHistoryQuerySchema", () => {
   it("limit の上限を超える値は拒否する", () => {
     expect(() =>
       ChatHistoryQuerySchema.parse({ limit: String(CHAT_HISTORY_MAX_LIMIT + 1) }),
+    ).toThrow();
+  });
+});
+
+describe("PlanItemGenSchema", () => {
+  it("imagePriority が未指定でもパースできる（後方互換性）", () => {
+    const item = {
+      id: "item-1",
+      type: "spot",
+      title: "清水寺",
+      description: "京都を代表する寺院で舞台からの眺望が見事です。",
+    };
+    const parsed = PlanItemGenSchema.parse(item);
+    expect(parsed.imagePriority).toBeUndefined();
+  });
+
+  it("imagePriority (1〜3) を保持できる", () => {
+    const item = {
+      id: "item-1",
+      type: "spot",
+      title: "清水寺",
+      description: "京都を代表する寺院で舞台からの眺望が見事です。",
+      imagePriority: 1,
+    };
+    const parsed = PlanItemGenSchema.parse(item);
+    expect(parsed.imagePriority).toBe(1);
+  });
+
+  it("imagePriority が範囲外（0や4など）の場合はエラーになる", () => {
+    expect(() =>
+      PlanItemGenSchema.parse({
+        id: "item-1",
+        type: "spot",
+        title: "清水寺",
+        description: "京都を代表する寺院です。",
+        imagePriority: 0,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      PlanItemGenSchema.parse({
+        id: "item-1",
+        type: "spot",
+        title: "清水寺",
+        description: "京都を代表する寺院です。",
+        imagePriority: 4,
+      }),
     ).toThrow();
   });
 });

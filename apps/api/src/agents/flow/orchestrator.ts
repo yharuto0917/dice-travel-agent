@@ -12,6 +12,7 @@ import { PlanDayGenSchema } from "@repo/shared";
 import { generateObject, stepCountIs, streamText, tool } from "ai";
 import { z } from "zod";
 import type { Bindings } from "../../env";
+import { mapWithConcurrency } from "../../lib/pool";
 import { createLlm, SUPERVISOR_MODEL_ID } from "../llm/provider";
 import { buildSubagents } from "../subagents";
 import { buildTools } from "../tools";
@@ -49,6 +50,17 @@ export type TimelineInput = {
   detail?: string | null;
 };
 export type TimelineCallback = (event: TimelineInput) => void;
+
+/**
+ * 1回の計画生成で使える画像生成試行枠。
+ *
+ * `remaining` は成功画像数ではなく、失敗を含む API 呼び出しの残枠。Agent 側は
+ * `onConsume` で予約数を Durable Object state へ保存し、日を跨いだ再発行を防ぐ。
+ */
+export interface ImageAttemptBudget {
+  remaining: number;
+  onConsume?: (count: number) => void;
+}
 
 /** サブエージェントのツール名（タイムライン上で kind="subagent" として可視化する）。 */
 const SUBAGENT_NAMES = new Set(["research", "enhancement", "factcheck", "summarize"]);
@@ -119,30 +131,93 @@ function sanitizeDay(day: PlanDay): PlanDay | null {
   return result.success ? (result.data as PlanDay) : null;
 }
 
-/** 画像を生成する対象の種別。観光名所（観光スポット `spot`）のみに限定する（#18）。 */
-const IMAGE_TARGET_TYPES: ReadonlySet<PlanItem["type"]> = new Set(["spot"]);
+/** 1計画あたりの生成画像の上限（#18, #21）。 */
+export const MAX_GENERATED_IMAGES_PER_PLAN = 6;
 
-/** 各日の生成枚数の上限（コスト・レイテンシの上限）。 */
-const MAX_IMAGES_PER_DAY = 6;
+/** 1日あたりの生成枚数の二次上限（退行防止）。 */
+export const MAX_IMAGES_PER_DAY = 6;
+
+/** 画像生成の同時並列実行数（Cloudflare Workers の同時接続制限およびレートリミット対策）。 */
+const IMAGE_CONCURRENCY = 2;
+
+/** type ごとのデフォルト画像掲載優先度（Agent が imagePriority を明示しなかった場合のフォールバック）。 */
+const DEFAULT_TYPE_PRIORITY: Partial<Record<PlanItem["type"], number>> = {
+  spot: 1,
+  activity: 2,
+};
+
+type ItemWithPriority = PlanItem & { imagePriority?: number };
 
 /**
- * 画像を生成する対象アイテムを選ぶ（#18）。
+ * 計画全体で残っている画像生成予算を算出する（#18, #21）。
+ * `item.image?.generated === true`（AI生成画像）のみをカウントし、検索API由来の画像は消費しない。
+ */
+export function remainingImageBudget(plan: TravelPlanDraft): number {
+  let count = 0;
+  for (const day of plan.days ?? []) {
+    for (const item of day.items ?? []) {
+      if (item.image?.generated === true) {
+        count++;
+      }
+    }
+  }
+  return Math.max(0, MAX_GENERATED_IMAGES_PER_PLAN - count);
+}
+
+/**
+ * 当該日の画像生成枠（上限枚数）を算出する（#18, #21）。
+ * - 1日の枠: min(ceil(dayItems / 2), 残りの計画予算を残日数で割った公平配分, MAX_IMAGES_PER_DAY, remBudget)
+ */
+export function imageBudgetForDay(
+  plan: TravelPlanDraft,
+  dayNumber: number,
+  dayItemCount: number,
+  remainingAttemptBudget: number = remainingImageBudget(plan),
+): number {
+  const totalDays =
+    plan.nights !== undefined && plan.nights >= 0 ? plan.nights + 1 : plan.days?.length || 1;
+  const remainingDays = Math.max(1, totalDays - dayNumber + 1);
+  const attemptBudget = Number.isFinite(remainingAttemptBudget)
+    ? Math.max(0, Math.floor(remainingAttemptBudget))
+    : 0;
+  const remBudget = Math.min(remainingImageBudget(plan), attemptBudget);
+  if (remBudget <= 0 || dayItemCount <= 0) return 0;
+
+  const fairShare = Math.ceil(remBudget / remainingDays);
+  const itemCap = Math.ceil(dayItemCount / 2);
+  return Math.max(0, Math.min(itemCap, fairShare, MAX_IMAGES_PER_DAY, remBudget));
+}
+
+/**
+ * 画像を生成する対象アイテムを選ぶ（#18, #21）。
  *
- * 観光名所（{@link IMAGE_TARGET_TYPES} = `spot`）のうち、まだ image を持たないものを上限まで採る。
- * 食事・宿・移動・体験・自由時間には生成しない。観光名所を1件も含まない日は画像なしになる。
+ * 各アイテムの `imagePriority`（Agent指定値: 1=ぜひ載せたい 2=体験等 3=なくてもよい）を最優先し、
+ * 未指定なら type 由来の既定値（spot: 1, activity: 2, その他: 未指定）で解決する。
+ * priority が存在し（未指定の食事・宿・移動等は対象外）、まだ image を持たないアイテムを
+ * 優先度昇順（1 > 2 > 3）で安定ソートし、上限 `limit` 件を抽出する。同順位は出現順を保つ。
  *
- * `limit` は生成枚数の上限。既定は1日あたりの上限だが、チャットの修正経路のように
- * 「修正1回あたり」で予算を配る呼び出し側が、残り枚数を渡して絞り込めるようにしている。
+ * `limit` は生成枚数の上限。既定は1日あたりの二次上限だが、通常は `imageBudgetForDay` の計算枠を渡す。
  */
 export function selectImageTargets(
-  items: PlanItem[],
+  items: ItemWithPriority[],
   limit: number = MAX_IMAGES_PER_DAY,
-): { index: number; item: PlanItem }[] {
+): { index: number; item: ItemWithPriority }[] {
   if (limit <= 0) return [];
-  return items
-    .map((item, index) => ({ item, index }))
-    .filter(({ item }) => !item.image && IMAGE_TARGET_TYPES.has(item.type))
-    .slice(0, limit);
+
+  const candidates = items
+    .map((item, index) => {
+      const priority = item.imagePriority ?? DEFAULT_TYPE_PRIORITY[item.type];
+      return { item, index, priority };
+    })
+    .filter(
+      (c): c is { item: ItemWithPriority; index: number; priority: number } =>
+        !c.item.image && c.priority !== undefined,
+    );
+
+  // 安定ソート（priority 昇順、同順位は元の出現順が保たれる）
+  candidates.sort((a, b) => a.priority - b.priority);
+
+  return candidates.slice(0, limit).map(({ index, item }) => ({ index, item }));
 }
 
 /**
@@ -155,42 +230,122 @@ export function imageSubject(item: PlanItem, destinationName: string | null): st
 }
 
 /**
- * 日の構造化後に、観光名所へ内容一致の風景画像を**決定的に**生成・埋め込む（#18）。
+ * 日の構造化後に、観光名所・体験へ内容一致の風景画像を**決定的に**生成・埋め込む（#18, #21）。
  *
- * かつては LLM が `generateImage` ツールを呼ぶ設計だったが、ステップ上限との競合や
- * URL（ランダム UUID）の転記失敗で「安定して出ない／貼り付け先と内容が不一致」だった。
- * ここでは LLM のツール呼び出しに依存せず、観光名所（`spot`）のタイトル・場所名から画像を
- * 並列生成する（上限 {@link MAX_IMAGES_PER_DAY} 枚）。観光名所が無い日は生成しない。
+ * 工程数・残り日数から動的に割り当てた枠に基づき、Agent の指定優先度（`imagePriority`）順に
+ * 画像を並列生成する（計画全体で最大 {@link MAX_GENERATED_IMAGES_PER_PLAN} 枚）。
+ * 生成完了後、D1 やクライアントへフラグが漏れないよう items から `imagePriority` を明示的に除去する。
  */
 async function generateDayImages(
   env: Bindings,
   plan: TravelPlanDraft,
   day: PlanDay,
   onActivity?: ActivityCallback,
+  onEvent?: TimelineCallback,
+  imageAttemptBudget?: ImageAttemptBudget,
 ): Promise<PlanDay> {
-  const targets = selectImageTargets(day.items);
-  if (targets.length === 0) return day;
+  try {
+    const budget = imageBudgetForDay(
+      plan,
+      day.dayNumber,
+      day.items.length,
+      imageAttemptBudget?.remaining,
+    );
+    const targets = selectImageTargets(day.items, budget);
+    if (targets.length === 0) {
+      // 対象がない場合も items から imagePriority を確実に落とす
+      return {
+        ...day,
+        items: day.items.map((item) => {
+          const { imagePriority: _p, ...cleanItem } = item as ItemWithPriority;
+          return cleanItem;
+        }),
+      };
+    }
 
-  onActivity?.("風景画像を生成しています…");
-  // setup ステップで title は "${目的地}の旅" 形式。末尾の "の旅" を落として目的地名を得る。
-  const destinationName = plan.title?.replace(/の旅$/, "").trim() || null;
+    onActivity?.("風景画像を生成しています…");
+    // setup ステップで title は "${目的地}の旅" 形式。末尾の "の旅" を落として目的地名を得る。
+    const destinationName = plan.title?.replace(/の旅$/, "").trim() || null;
 
-  const generated = await Promise.all(
-    targets.map((t) => generateItemImage(env, imageSubject(t.item, destinationName))),
-  );
+    // API 呼び出しの直前に枠を予約する。成功画像だけを数えると、失敗した枠が後日に
+    // 再発行され、計画全体の最大6試行を超えるため、失敗も消費として永続化する。
+    if (imageAttemptBudget) {
+      imageAttemptBudget.remaining = Math.max(0, imageAttemptBudget.remaining - targets.length);
+      imageAttemptBudget.onConsume?.(targets.length);
+    }
 
-  const byIndex = new Map<number, GeneratedImage>();
-  targets.forEach((t, k) => {
-    const img = generated[k];
-    if (img) byIndex.set(t.index, img);
-  });
-  if (byIndex.size === 0) return day;
+    const settled = await mapWithConcurrency(targets, IMAGE_CONCURRENCY, (t) =>
+      generateItemImage(env, imageSubject(t.item, destinationName)),
+    );
 
-  const items = day.items.map((item, index) => {
-    const img = byIndex.get(index);
-    return img ? { ...item, image: { url: img.url, alt: img.prompt, generated: true } } : item;
-  });
-  return { ...day, items };
+    const byIndex = new Map<number, GeneratedImage>();
+    settled.forEach((res, k) => {
+      if (res.status === "fulfilled" && res.value) {
+        const t = targets[k];
+        if (t) byIndex.set(t.index, res.value);
+      }
+    });
+
+    onEvent?.({
+      kind: "tool",
+      label: `${day.dayNumber}日目の画像生成`,
+      status: byIndex.size > 0 ? "done" : "error",
+      detail: `${targets.length}件中${byIndex.size}件の画像を生成しました`,
+    });
+
+    const items = day.items.map((item, index) => {
+      const { imagePriority: _p, ...cleanItem } = item as ItemWithPriority;
+      const img = byIndex.get(index);
+      return img
+        ? { ...cleanItem, image: { url: img.url, alt: img.prompt, generated: true } }
+        : cleanItem;
+    });
+    return { ...day, items };
+  } catch (error) {
+    console.error("[generateDayImages] Error:", error);
+    return {
+      ...day,
+      items: day.items.map((item) => {
+        const { imagePriority: _p, ...cleanItem } = item as ItemWithPriority;
+        return cleanItem;
+      }),
+    };
+  }
+}
+
+/**
+ * 空日修復で新しく items が入った日だけ画像を補う。
+ *
+ * 日ごとの画像生成は内部で2並列なので、複数日をここでも並列化すると Worker 全体の
+ * 外向き接続数が膨らむ。修復日は順に処理し、各反復で最新の days を渡して残枠を正しく減らす。
+ */
+export async function generateImagesForRepairedDays(
+  env: Bindings,
+  before: TravelPlanDraft,
+  after: TravelPlanDraft,
+  onActivity?: ActivityCallback,
+  imageAttemptBudget?: ImageAttemptBudget,
+): Promise<TravelPlanDraft> {
+  const beforeDays = before.days ?? [];
+  const days = [...(after.days ?? [])];
+  // 単体利用時も修復日間で同じ枠を共有する。本番では Agent state と接続された枠が渡る。
+  const attempts = imageAttemptBudget ?? { remaining: remainingImageBudget(after) };
+
+  for (let index = 0; index < days.length; index++) {
+    const previousDay = beforeDays[index];
+    const repairedDay = days[index];
+    if (!previousDay || previousDay.items.length > 0 || !repairedDay?.items.length) continue;
+    days[index] = await generateDayImages(
+      env,
+      { ...after, days },
+      repairedDay,
+      onActivity,
+      undefined,
+      attempts,
+    );
+  }
+
+  return { ...after, days };
 }
 
 /** ツール名 → 日本語の実行状況ラベル。ストリーミング中の表示に使う。 */
@@ -219,6 +374,7 @@ export async function runDay(
   n: number,
   onActivity?: ActivityCallback,
   onEvent?: TimelineCallback,
+  imageAttemptBudget?: ImageAttemptBudget,
 ): Promise<RunDayResult> {
   let finalizedDay: PlanDay | null = null;
 
@@ -244,30 +400,27 @@ export async function runDay(
     finalizeDay,
   };
 
-  // streamText でマルチステップのツール呼び出しループを回しつつ、思考・ツール実行の
-  // 進行を fullStream から逐次 onActivity へ通知する（UI のライブ表示用）。AI SDK v6 は
-  // stopWhen 省略時 stepCountIs(1) で 1 ステップ停止しツール結果が再投入されないため、
-  // ステップ数上限・使用量上限・HITL の各停止条件を明示する。
-  const result = streamText({
-    model: createLlm(env, SUPERVISOR_MODEL_ID),
-    system: DAY_PLANNER_SYSTEM,
-    prompt: dayPlannerPrompt(plan, n, ctx),
-    providerOptions: {
-      google: {
-        thinkingConfig: {
+  const createStream = () =>
+    streamText({
+      model: createLlm(env, SUPERVISOR_MODEL_ID),
+      system: DAY_PLANNER_SYSTEM,
+      prompt: dayPlannerPrompt(plan, n, ctx),
+      providerOptions: {
+        google: {
           // Supervisor（統括の day-planner）は gemini-3.6-flash を high で動かす。
-          thinkingLevel: "high",
-          includeThoughts: true,
-        },
-      } satisfies GoogleGenerativeAIProviderOptions,
-    },
-    tools: allTools,
-    stopWhen: [
-      stepCountIs(MAX_STEPS),
-      () => shouldStopUsageLimit(ctx.usage),
-      () => ctx.hitl.pending.length > 0,
-    ],
-  });
+          thinkingConfig: {
+            thinkingLevel: "high",
+            includeThoughts: true,
+          },
+        } satisfies GoogleGenerativeAIProviderOptions,
+      },
+      tools: allTools,
+      stopWhen: [
+        stepCountIs(MAX_STEPS),
+        () => shouldStopUsageLimit(ctx.usage),
+        () => ctx.hitl.pending.length > 0,
+      ],
+    });
 
   // fullStream を消費してツールを実行させつつ、実行状況・思考要約を通知する。
   // 併せて、構造化の根拠となる「ツール結果(output)」と「最終テキスト」を蓄積する。
@@ -280,6 +433,7 @@ export async function runDay(
   let reasoningId: string | null = null;
   let finalText = "";
   const toolNotes: string[] = [];
+  const streamErrors: unknown[] = [];
 
   // 進行中の思考ブロックを「終わった思考」として履歴へ確定する。reasoning の全文を
   // detail に載せ（上限で切り詰め）、フロントで開いて読めるようにする。思考が空なら何もしない。
@@ -298,72 +452,142 @@ export async function runDay(
     emittedLen = 0;
   };
 
-  for await (const part of result.fullStream) {
-    if (part.type === "tool-input-start") {
-      // 思考の直後にツールへ移ることが多いので、まず進行中の思考を確定する。
-      flushThinking();
-      const label = toolLabel(part.toolName);
-      onActivity?.(label);
-      // ツール／サブエージェントの「開始」を履歴へ。groupId はツール呼び出しIDで done と対にする。
-      onEvent?.({
-        kind: SUBAGENT_NAMES.has(part.toolName) ? "subagent" : "tool",
-        label,
-        status: "start",
-        groupId: "id" in part ? part.id : null,
-      });
-    } else if (part.type === "tool-result") {
-      // finalizeDay の戻り値は構造化の根拠にならないので記録しない。
-      if (part.toolName !== "finalizeDay") {
-        const view = compactJson(part.output);
-        if (view) toolNotes.push(`[${part.toolName}] ${view}`);
-      }
-      // ツール／サブエージェントの「完了」を履歴へ。detail はサブエージェントの要約だけ載せる
-      // （通常ツールの生 JSON/HTML はノイズになるため出さない）。
-      const isSubagent = SUBAGENT_NAMES.has(part.toolName);
-      onEvent?.({
-        kind: isSubagent ? "subagent" : "tool",
-        label: toolLabel(part.toolName),
-        status: "done",
-        groupId: "toolCallId" in part ? part.toolCallId : null,
-        detail: isSubagent ? compactJson(part.output, 200) : null,
-      });
-    } else if (part.type === "reasoning-start") {
-      // 前の思考ブロックが未確定なら閉じてから、新しい思考の「開始」を履歴へ積む。
-      flushThinking();
-      reasoningSeq += 1;
-      reasoningId = `think-${reasoningSeq}`;
-      onActivity?.("思考しています…");
-      onEvent?.({
-        kind: "thinking",
-        label: "思考しています",
-        status: "start",
-        groupId: reasoningId,
-      });
-    } else if (part.type === "reasoning-delta") {
-      reasoningBuf += part.text;
-      if (reasoningBuf.length - emittedLen >= 40) {
-        emittedLen = reasoningBuf.length;
-        // 生成中の思考を、同 groupId の行へ逐次反映する（履歴上でライブに見える）。
-        // 末尾だけ（reasoningTail）を detail に載せ、確定時に全文へ差し替える。
+  const consumeStream = async (result: ReturnType<typeof createStream>) => {
+    for await (const part of result.fullStream) {
+      if (part.type === "tool-input-start") {
+        // 思考の直後にツールへ移ることが多いので、まず進行中の思考を確定する。
+        flushThinking();
+        const label = toolLabel(part.toolName);
+        onActivity?.(label);
+        // ツール／サブエージェントの「開始」を履歴へ。groupId はツール呼び出しIDで done と対にする。
+        onEvent?.({
+          kind: SUBAGENT_NAMES.has(part.toolName) ? "subagent" : "tool",
+          label,
+          status: "start",
+          groupId: "id" in part ? part.id : null,
+        });
+      } else if (part.type === "tool-result") {
+        // finalizeDay の戻り値は構造化の根拠にならないので記録しない。
+        if (part.toolName !== "finalizeDay") {
+          const view = compactJson(part.output);
+          if (view) toolNotes.push(`[${part.toolName}] ${view}`);
+        }
+        // ツール／サブエージェントの「完了」を履歴へ。detail はサブエージェントの要約だけ載せる
+        // （通常ツールの生 JSON/HTML はノイズになるため出さない）。
+        const isSubagent = SUBAGENT_NAMES.has(part.toolName);
+        onEvent?.({
+          kind: isSubagent ? "subagent" : "tool",
+          label: toolLabel(part.toolName),
+          status: "done",
+          groupId: "toolCallId" in part ? part.toolCallId : null,
+          detail: isSubagent ? compactJson(part.output, 200) : null,
+        });
+      } else if (part.type === "reasoning-start") {
+        // 前の思考ブロックが未確定なら閉じてから、新しい思考の「開始」を履歴へ積む。
+        flushThinking();
+        reasoningSeq += 1;
+        reasoningId = `think-${reasoningSeq}`;
+        onActivity?.("思考しています…");
         onEvent?.({
           kind: "thinking",
           label: "思考しています",
           status: "start",
           groupId: reasoningId,
-          detail: reasoningTail(reasoningBuf),
+        });
+      } else if (part.type === "reasoning-delta") {
+        reasoningBuf += part.text;
+        if (reasoningBuf.length - emittedLen >= 40) {
+          emittedLen = reasoningBuf.length;
+          // 生成中の思考を、同 groupId の行へ逐次反映する（履歴上でライブに見える）。
+          // 末尾だけ（reasoningTail）を detail に載せ、確定時に全文へ差し替える。
+          onEvent?.({
+            kind: "thinking",
+            label: "思考しています",
+            status: "start",
+            groupId: reasoningId,
+            detail: reasoningTail(reasoningBuf),
+          });
+        }
+      } else if (part.type === "reasoning-end") {
+        flushThinking();
+      } else if (part.type === "text-delta") {
+        // 最終テキストへ移る前に進行中の思考を確定する。
+        flushThinking();
+        finalText += part.text;
+        onActivity?.("日程をまとめています…");
+      } else if (part.type === "error") {
+        flushThinking();
+        const err = (part as { error?: unknown }).error;
+        streamErrors.push(err);
+        console.error(`[runDay] Stream error on day ${n}:`, err);
+        onEvent?.({
+          kind: "tool",
+          label: "データ収集ストリームでエラーが発生しました",
+          status: "error",
+          detail: String(err).slice(0, 500),
         });
       }
-    } else if (part.type === "reasoning-end") {
-      flushThinking();
-    } else if (part.type === "text-delta") {
-      // 最終テキストへ移る前に進行中の思考を確定する。
-      flushThinking();
-      finalText += part.text;
-      onActivity?.("日程をまとめています…");
     }
+  };
+
+  /**
+   * ストリーム消費を例外から守る。`fullStream` は通常エラーを `error` パートとして流すが、
+   * 接続断などで for-await 自体が throw することがある。ここで捕まえないと、
+   * finalizeDay/構造化で組み上げ済みの day ごと例外が runStep へ伝播し、
+   * 「1日が丸ごと消える」という本 PR が潰したはずの失敗モードに戻る。
+   * throw も `streamErrors` に積み、下の再試行判定に載せる。成否を真偽値で返す。
+   */
+  const consumeStreamSafely = async (): Promise<boolean> => {
+    const errorCountBefore = streamErrors.length;
+    try {
+      await consumeStream(createStream());
+      // fullStream は provider error を throw せず `error` パートとして返すことがある。
+      // 例外の有無だけで成功判定すると、失敗した再試行を「完了」と誤表示してしまう。
+      return streamErrors.length === errorCountBefore;
+    } catch (err) {
+      streamErrors.push(err);
+      console.error(`[runDay] Stream threw on day ${n}:`, err);
+      onEvent?.({
+        kind: "tool",
+        label: "データ収集ストリームが中断しました",
+        status: "error",
+        groupId: `stream-abort-${n}`,
+        detail: String(err).slice(0, 500),
+      });
+      return false;
+    } finally {
+      // 正常終了・例外いずれの場合も、未確定の思考を確定して履歴の行を閉じる。
+      flushThinking();
+    }
+  };
+
+  await consumeStreamSafely();
+
+  // 根拠ゼロ（ツール結果も最終テキストも空）かつストリームエラーが発生していた場合、
+  // 使用量上限に達していなければ短いバックオフの後に1回だけ再試行する
+  if (
+    !finalizedDay &&
+    toolNotes.length === 0 &&
+    !finalText.trim() &&
+    streamErrors.length > 0 &&
+    !shouldStopUsageLimit(ctx.usage)
+  ) {
+    onActivity?.("通信エラーのため再試行しています…");
+    onEvent?.({
+      kind: "tool",
+      label: "ストリームを再試行しています",
+      status: "start",
+      groupId: `retry-stream-${n}`,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    const retried = await consumeStreamSafely();
+    onEvent?.({
+      kind: "tool",
+      label: retried ? "ストリームの再試行が完了しました" : "ストリームの再試行にも失敗しました",
+      status: retried ? "done" : "error",
+      groupId: `retry-stream-${n}`,
+    });
   }
-  // ループ終了時に未確定の思考が残っていれば確定する。
-  flushThinking();
 
   // HITL が発火していたら、day を確定せずに中断を返す。空の日をマージしないため
   // finalizeDay/構造化より先に判定する。
@@ -394,9 +618,23 @@ export async function runDay(
     day = structured?.items.length ? structured : { dayNumber: n, title: `${n}日目`, items: [] };
   }
 
-  // 各アイテムへ内容一致の風景画像を決定的に生成・埋め込む（各日2枚以上, #18）。
+  // 各アイテムへ内容一致の風景画像を決定的に生成・埋め込む（#18, #21）。
   // 全経路（finalizeDay 採用・構造化・フォールバック）に共通で適用する単一の出口。
-  return { status: "ok", day: await generateDayImages(env, plan, day, onActivity) };
+  let dayWithImages = day;
+  try {
+    dayWithImages = await generateDayImages(
+      env,
+      plan,
+      day,
+      onActivity,
+      onEvent,
+      imageAttemptBudget,
+    );
+  } catch (err) {
+    console.error(`[runDay] Failed to generate images for day ${n}:`, err);
+    dayWithImages = day;
+  }
+  return { status: "ok", day: dayWithImages };
 }
 
 /** ツール結果を抽出根拠用にコンパクト化する（巨大 JSON を上限内に収める）。 */
@@ -454,7 +692,7 @@ async function structureDay(
         } satisfies GoogleGenerativeAIProviderOptions,
       },
       system:
-        "あなたは1日分の旅行旅程を構造化 PlanDay として組み立てる専門家です。妥当な startTime を付けた4〜7件の、現実的で順序立てた予定（観光スポット・食事・移動など）を必ず作成してください。優先順位は次の通りです: (1) ツールデータにある実在の名称・住所を最優先で使う。(2) ツールデータが不足している場合は、目的地に実在するよく知られた観光スポット・飲食店・名所をあなたの知識から補う。架空の場所を作ってはいけませんが、items を空にすることは絶対に禁止です——必ず具体的な予定で埋めてください。各 item には `description`（日本語1〜2文の詳細説明）を必ず付け、しおりの読者向けに「そこで何をするか」「見どころ・名物」を具体的に書くこと（タイトルの言い換えや空文字は不可）。前日までに訪問済みのスポット・飲食店は再訪・重複させず、前日の最終地点・宿泊地から自然につながる動線にし、旅行全体の予算を意識すること。スキーマや検証に関するメタ的な文言をどのフィールドにも書かないこと。出力（title・description・各 item の名称など、すべての自然言語フィールド）は必ず日本語で記述してください。`title` は『N日目』のような短いラベルにしてください。",
+        'あなたは1日分の旅行旅程を構造化 PlanDay として組み立てる専門家です。妥当な startTime を付けた4〜7件の、現実的で順序立てた予定（観光スポット・食事・移動など）を必ず作成してください。1日あたり最低でも3件以上の観光スポット（`type="spot"`）を必ず含めてください。優先順位は次の通りです: (1) ツールデータにある実在の名称・住所を最優先で使う。(2) ツールデータが不足している場合は、目的地に実在するよく知られた観光スポット・飲食店・名所をあなたの知識から補う。架空の場所を作ってはいけませんが、items を空にすることは絶対に禁止です——必ず具体的な予定で埋めてください。各 item には `description`（日本語1〜2文の詳細説明）を必ず付け、しおりの読者向けに「そこで何をするか」「見どころ・名物」を具体的に書くこと（タイトルの言い換えや空文字は不可）。写真を載せたい項目にだけ `imagePriority` を付けること（1=ぜひ載せたい、2=あれば良い、3=なくてもよい）。観光名所は原則1、体験は2。食事・移動・宿泊・自由時間など写真が不要な項目には設定しないこと（全項目に付けてはいけない）。前日までに訪問済みのスポット・飲食店は再訪・重複させず、前日の最終地点・宿泊地から自然につながる動線にし、旅行全体の予算を意識すること。スキーマや検証に関するメタ的な文言をどのフィールドにも書かないこと。出力（title・description・各 item の名称など、すべての自然言語フィールド）は必ず日本語で記述してください。`title` は『N日目』のような短いラベルにしてください。',
       prompt: `対象は ${n}日目です。\n\n旅行のコンテキスト:\n${contextBlock}\n\nこれまでに確定した日程（重複させない／動線をつなぐ）:\n${priorBlock}\n\nプランナーのメモ:\n${plannerText || "(なし)"}\n\nツールで収集したデータ:\n${dataBlock}`,
     });
     // 生成スキーマ（フラット）→ 保存スキーマ（union）。type により union のいずれかを

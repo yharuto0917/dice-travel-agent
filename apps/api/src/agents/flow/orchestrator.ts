@@ -407,9 +407,9 @@ export async function runDay(
       prompt: dayPlannerPrompt(plan, n, ctx),
       providerOptions: {
         google: {
-          // Supervisor（統括の day-planner）は gemini-3.6-flash を high で動かす。
+          // Supervisor（統括の day-planner）は gemini-3.7-flash を medium で動かす。
           thinkingConfig: {
-            thinkingLevel: "high",
+            thinkingLevel: "medium",
             includeThoughts: true,
           },
         } satisfies GoogleGenerativeAIProviderOptions,

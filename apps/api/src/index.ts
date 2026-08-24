@@ -34,11 +34,13 @@ app.use(
   }),
 );
 
+// 静的・生成アセット配信（Cookie 付与不要、immutable キャッシュを汚さない）
+app.route("/assets", assetsRoute);
+
 // 全ルートで匿名クライアントIDを解決（無ければ発行）する。
 app.use("*", clientId);
 
 app.route("/plans", plansRoute);
-app.route("/assets", assetsRoute);
 
 app.get("/", (c) => c.text("Dice Travel Agent API is running!"));
 app.get("/health", (c) => c.json({ ok: true }));

@@ -3,7 +3,7 @@ import * as React from "react";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { diceTextures } from "./diceTexture";
+import { createDiceTextures } from "./diceTexture";
 
 const faceVectors = [
   new THREE.Vector3(1, 0, 0),
@@ -121,6 +121,21 @@ export function Dice({ gameState, onRollComplete, triggerRoll }: DiceProps) {
 
   const geom = React.useMemo(() => new RoundedBoxGeometry(1.2, 1.2, 1.2, 4, 0.1), []);
 
+  // テクスチャはマウント単位で生成する。モジュールスコープの定数として全マウントで
+  // 共有していると、r3f が <Canvas> のアンマウント時に forceContextLoss() で WebGL
+  // コンテキストを破棄したあと、再訪問時に同じテクスチャが新しいコンテキストへ渡され、
+  // サイコロの面が黒く描画される（#22 で報告された「再訪問時だけ真っ黒」の原因）。
+  const textures = React.useMemo(() => createDiceTextures(), []);
+
+  // GPU リソースは React のライフサイクルに合わせて必ず解放する。
+  // 解放しないと /dice を往復するたびにテクスチャとジオメトリが漏れていく。
+  useEffect(() => {
+    return () => {
+      for (const texture of textures) texture.dispose();
+      geom.dispose();
+    };
+  }, [textures, geom]);
+
   return (
     <mesh
       // biome-ignore lint/suspicious/noExplicitAny: Cannon ref typing compatibility
@@ -129,7 +144,7 @@ export function Dice({ gameState, onRollComplete, triggerRoll }: DiceProps) {
       receiveShadow
       geometry={geom}
     >
-      {diceTextures.map((texture, index) => (
+      {textures.map((texture, index) => (
         <meshStandardMaterial
           key={`texture-${index.toString()}`}
           attach={`material-${index}`}

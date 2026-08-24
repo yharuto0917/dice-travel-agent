@@ -32,7 +32,15 @@ export function DiceScene({
   };
 
   return (
-    <Canvas shadows camera={{ position: [0, 7, 7], fov: 40 }}>
+    <Canvas
+      shadows
+      camera={{ position: [0, 7, 7], fov: 40 }}
+      // 既定値だが、意図を明示して固定する。JapanMap3D は alpha: false ＋ scene 背景色を
+      // 持つが、こちらは親（dice ページの bg-surface-2 ＋ shadow-inner のカード）を
+      // 透過して見せる設計なので alpha: true が正しい。既定値任せにしておくと、
+      // ライブラリ側の既定が変わったときに黙って不透明の黒へ落ちる。
+      gl={{ antialias: true, alpha: true }}
+    >
       <ambientLight intensity={0.6} />
       <directionalLight
         castShadow

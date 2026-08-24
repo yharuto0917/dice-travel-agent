@@ -1,22 +1,53 @@
 import * as THREE from "three";
 
-export function createDiceTexture(num: number): THREE.CanvasTexture {
+/** サイコロ1面ぶんのテクスチャ解像度（正方形）。 */
+const FACE_SIZE = 512;
+
+/**
+ * 2D コンテキストが取れなかったときの代替テクセル（サイコロの地色）。
+ *
+ * 空の canvas から CanvasTexture を作ると中身が透明＝黒として標本化され、
+ * サイコロの面が真っ黒になる。目は失われるが、黒い立方体よりは白い立方体の方が
+ * 明らかにマシなので、地色だけの 1x1 テクスチャへフォールバックする。
+ */
+function createFallbackTexture(): THREE.DataTexture {
+  // #fdfdfd 相当（下の塗りつぶしと同じ地色）。
+  const data = new Uint8Array([253, 253, 253, 255]);
+  const texture = new THREE.DataTexture(data, 1, 1, THREE.RGBAFormat);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+/**
+ * 目の数から1面ぶんのテクスチャを生成する。
+ *
+ * 返り値は呼び出し側が所有する。**モジュールスコープで生成して使い回してはならない**：
+ * r3f は `<Canvas>` のアンマウント時に `forceContextLoss()` で WebGL コンテキストを
+ * 破棄するため、コンテキストを跨いで同じテクスチャを共有すると、再訪問時に
+ * サイコロの面が黒く描画される。必ずマウント単位で生成し、破棄すること。
+ */
+export function createDiceTexture(num: number): THREE.Texture {
   const canvas = document.createElement("canvas");
-  canvas.width = 512;
-  canvas.height = 512;
+  canvas.width = FACE_SIZE;
+  canvas.height = FACE_SIZE;
   const ctx = canvas.getContext("2d");
-  if (!ctx) return new THREE.CanvasTexture(canvas);
+  if (!ctx) {
+    // 失敗を握り潰すと「サイコロが黒い」という分かりにくい症状だけが残るため、必ず記録する。
+    console.error("[dice] 2D コンテキストを取得できませんでした。地色のみで代替します。");
+    return createFallbackTexture();
+  }
 
   // Background - Off-white realistic bone/plastic color
   ctx.fillStyle = "#fdfdfd";
-  ctx.fillRect(0, 0, 512, 512);
+  ctx.fillRect(0, 0, FACE_SIZE, FACE_SIZE);
 
   // Subtle bevel/edge shading
   const gradient = ctx.createRadialGradient(256, 256, 180, 256, 256, 360);
   gradient.addColorStop(0, "rgba(0,0,0,0)");
   gradient.addColorStop(1, "rgba(0,0,0,0.05)");
   ctx.fillStyle = gradient;
-  ctx.fillRect(0, 0, 512, 512);
+  ctx.fillRect(0, 0, FACE_SIZE, FACE_SIZE);
 
   // Dots
   const drawDot = (x: number, y: number) => {
@@ -68,11 +99,17 @@ export function createDiceTexture(num: number): THREE.CanvasTexture {
   return texture;
 }
 
-export const diceTextures = [
-  createDiceTexture(1), // +X
-  createDiceTexture(6), // -X
-  createDiceTexture(2), // +Y
-  createDiceTexture(5), // -Y
-  createDiceTexture(3), // +Z
-  createDiceTexture(4), // -Z
-];
+/** BoxGeometry のマテリアル順（+X, -X, +Y, -Y, +Z, -Z）に対応する目の並び。 */
+const FACE_ORDER = [1, 6, 2, 5, 3, 4] as const;
+
+/**
+ * サイコロ6面ぶんのテクスチャを生成する。
+ *
+ * 呼び出し側（`Dice`）がマウント単位で生成し、アンマウント時に `dispose()` する。
+ * かつてはモジュールスコープの定数配列として全マウントで共有していたが、
+ * WebGL コンテキストを跨いだ共有になり、`/dice` へ再訪問した際にサイコロの面が
+ * 黒くなる不具合を起こしていた。
+ */
+export function createDiceTextures(): THREE.Texture[] {
+  return FACE_ORDER.map((num) => createDiceTexture(num));
+}

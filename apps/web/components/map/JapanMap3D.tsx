@@ -22,20 +22,14 @@ export const JapanMap3D: React.FC<JapanMap3DProps> = ({
   selectedPrefectureId = null,
   onSelectPrefecture,
 }) => {
-  const [mounted, setMounted] = useState(false);
   // biome-ignore lint/suspicious/noExplicitAny: GeoJSON features array is complex
   const [mapData, setMapData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // SSR回避
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   // TopoJSONデータのフェッチとパース
   useEffect(() => {
-    if (!mounted) return;
+    let active = true;
 
     const loadMapData = async () => {
       try {
@@ -51,25 +45,29 @@ export const JapanMap3D: React.FC<JapanMap3DProps> = ({
         if (topoData?.objects?.japan) {
           // biome-ignore lint/suspicious/noExplicitAny: topojson-client returns untyped geometry
           const geojson = topojson.feature(topoData, topoData.objects.japan) as any;
-          setMapData(geojson.features);
+          if (active) setMapData(geojson.features);
         } else {
           throw new Error("Invalid TopoJSON structure");
         }
         // biome-ignore lint/suspicious/noExplicitAny: fetch error object
       } catch (err: any) {
         console.error("Error loading map data:", err);
-        setError(err.message || "地図データの読み込みに失敗しました");
+        if (active) setError(err.message || "地図データの読み込みに失敗しました");
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
 
     loadMapData();
-  }, [mounted]);
 
-  if (!mounted || loading) {
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (loading) {
     return (
-      <div className="flex h-full min-h-[360px] w-full flex-col items-center justify-center gap-3 bg-surface-2">
+      <div className="flex h-full min-h-[360px] w-full flex-col items-center justify-center gap-3 bg-surface-2 rounded-3xl">
         <CircleNotch size={40} weight="bold" className="animate-spin text-primary" />
         <p className="text-sm font-bold text-muted">3D日本地図を読み込み中…</p>
       </div>

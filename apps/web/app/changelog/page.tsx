@@ -16,7 +16,7 @@ export default function ChangelogPage() {
   const releases = getChangelog();
 
   return (
-    <div className="mx-auto flex min-h-dvh max-w-lg flex-col px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))]">
+    <div className="flex min-h-dvh flex-col px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))]">
       <header className="flex items-center gap-3">
         <Link
           href="/"
@@ -38,16 +38,18 @@ export default function ChangelogPage() {
               <CardBody className="p-5">
                 <div className="flex items-center justify-between border-b border-line pb-3">
                   <div className="flex items-center gap-2">
-                    <span className="rounded-full border border-line bg-primary/10 px-2.5 py-0.5 text-xs font-extrabold text-primary">
+                    <h2 className="rounded-full border border-line bg-primary/10 px-2.5 py-0.5 text-xs font-extrabold text-primary">
                       v{release.version}
-                    </span>
+                    </h2>
                     {index === 0 && (
                       <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[0.625rem] font-bold text-emerald-600">
                         最新
                       </span>
                     )}
                   </div>
-                  <time className="text-xs font-medium text-muted">{release.date}</time>
+                  <time dateTime={release.date} className="text-xs font-medium text-muted">
+                    {release.date}
+                  </time>
                 </div>
                 <div className="pt-3 text-sm">
                   <Response>{release.content}</Response>

@@ -25,6 +25,7 @@ export default async function Home() {
               href="/changelog"
               className="rounded-full border border-line bg-surface px-2 py-0.5 text-[0.625rem] font-bold text-muted transition-colors hover:border-primary/50 hover:bg-surface-2 hover:text-foreground active:scale-95"
               title="更新履歴を見る"
+              aria-label={`バージョン ${process.env.NEXT_PUBLIC_APP_VERSION} の更新履歴を見る`}
             >
               v{process.env.NEXT_PUBLIC_APP_VERSION}
             </Link>

@@ -51,7 +51,7 @@ export function parseChangelog(markdown: string): ChangelogRelease[] {
 
 /**
  * content/changelog.md のパスを解決する。
- * モノレポルート、apps/web ルート、__dirname いずれの実行コンテキストでも見つけられるようにする。
+ * Turbopack の静的トレースを阻害しないよう、apps/web ルートおよびモノレポルートから探索する。
  */
 function resolveChangelogPath(): string | null {
   const defaultPath = path.join(process.cwd(), "content", "changelog.md");

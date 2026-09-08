@@ -1,4 +1,4 @@
-import { ArrowRight, Compass, DiceFive, MapPinLine } from "@phosphor-icons/react/dist/ssr";
+import { ArrowRight, Compass, DiceFive, MapPinLine, Sparkle } from "@phosphor-icons/react/dist/ssr";
 import { cookies } from "next/headers";
 import Link from "next/link";
 import { HistoryPlanLink } from "@/components/chat/history-plan-link";
@@ -14,16 +14,29 @@ export default async function Home() {
 
   return (
     <div className="flex min-h-dvh flex-col px-5 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(2rem,env(safe-area-inset-top))]">
-      <header className="flex items-center gap-2.5">
-        <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border-2 border-line bg-primary text-primary-foreground shadow-toy">
-          <DiceFive size={22} weight="fill" />
-        </span>
-        <span className="text-lg font-extrabold tracking-tight">旅ダイス</span>
-        {process.env.NEXT_PUBLIC_APP_VERSION && (
-          <span className="rounded-full border border-line bg-surface px-2 py-0.5 text-[0.625rem] font-bold text-muted">
-            v{process.env.NEXT_PUBLIC_APP_VERSION}
+      <header className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border-2 border-line bg-primary text-primary-foreground shadow-toy">
+            <DiceFive size={22} weight="fill" />
           </span>
-        )}
+          <span className="text-lg font-extrabold tracking-tight">旅ダイス</span>
+          {process.env.NEXT_PUBLIC_APP_VERSION && (
+            <Link
+              href="/changelog"
+              className="rounded-full border border-line bg-surface px-2 py-0.5 text-[0.625rem] font-bold text-muted transition-colors hover:border-primary/50 hover:bg-surface-2 hover:text-foreground active:scale-95"
+              title="更新履歴を見る"
+            >
+              v{process.env.NEXT_PUBLIC_APP_VERSION}
+            </Link>
+          )}
+        </div>
+        <Link
+          href="/changelog"
+          className="inline-flex items-center gap-1.5 rounded-full border-2 border-line bg-surface px-3 py-1 text-xs font-bold text-foreground shadow-toy transition-all hover:bg-surface-2 active:scale-95"
+        >
+          <Sparkle size={14} weight="bold" className="text-primary" />
+          更新履歴
+        </Link>
       </header>
 
       <section className="mt-10">
@@ -77,8 +90,11 @@ export default async function Home() {
         )}
       </section>
 
-      <footer className="mt-auto pt-10 text-center text-xs text-muted">
-        TabiDice ©2026 Y.Haruto
+      <footer className="mt-auto flex items-center justify-between pt-10 text-xs text-muted">
+        <span>TabiDice ©2026 Y.Haruto</span>
+        <Link href="/changelog" className="transition-colors hover:text-foreground hover:underline">
+          更新履歴
+        </Link>
       </footer>
     </div>
   );

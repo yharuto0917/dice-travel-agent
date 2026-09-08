@@ -20,7 +20,7 @@ describe("llm/provider", () => {
 
   it("should default to the supervisor model", () => {
     const llm = createLlm(env);
-    expect(llm.modelId).toBe("gemini-3.7-flash");
+    expect(llm.modelId).toBe("gemini-3.8-flash");
     expect(llm.modelId).toBe(SUPERVISOR_MODEL_ID);
     expect(llm.provider).toBe("google.generative-ai");
   });

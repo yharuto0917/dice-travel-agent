@@ -58,7 +58,7 @@ TabiDice は、Cloudflare のエッジコンピューティング環境（Cloudf
 * **フレームワーク**: Hono (Edge-optimized API framework)
 * **エージェント基盤**: Cloudflare Agents SDK (Durable Objects による状態・WebSocket 接続の管理)
 * **LLM 統合**: Vercel AI SDK (`ai` / `@ai-sdk/google`)
-* **モデル**: Gemini 3.5 Flash (Cloudflare AI Gateway 経由によるロギングと監視)
+* **モデル**: Gemini 3.8 Flash (Supervisor) / Gemini 3.5 Flash Lite (Subagents) (Cloudflare AI Gateway 経由によるロギングと監視)
 * **データベース**: Cloudflare D1 (SQLite 互換) & Drizzle ORM
 * **ストレージ / キャッシュ**: Cloudflare KV (レート制限・サイトキャッシュなど), Cloudflare R2 (アセットバケット)
 

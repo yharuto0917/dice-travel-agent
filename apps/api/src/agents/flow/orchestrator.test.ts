@@ -307,6 +307,26 @@ describe("runDay の障害耐性", () => {
 
   const plan = { title: "京都府の旅", summary: "テスト", nights: 1 };
 
+  it("Supervisor の streamText 呼び出し時に thinkingLevel: 'medium' と includeThoughts: true が設定される", async () => {
+    vi.mocked(streamText).mockReturnValue(streamOf([]) as never);
+    vi.mocked(generateObject).mockResolvedValue({ object: structuredDay } as never);
+
+    await runDay({} as never, makeCtx(), plan, 1);
+
+    expect(streamText).toHaveBeenCalledWith(
+      expect.objectContaining({
+        providerOptions: {
+          google: {
+            thinkingConfig: {
+              thinkingLevel: "medium",
+              includeThoughts: true,
+            },
+          },
+        },
+      }),
+    );
+  });
+
   it("画像1枚が失敗しても日は残り、成功した分だけ画像が付く", async () => {
     vi.mocked(streamText).mockReturnValue(streamOf([]) as never);
     vi.mocked(generateObject).mockResolvedValue({ object: structuredDay } as never);

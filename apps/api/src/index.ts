@@ -15,6 +15,7 @@ import {
 import { agentCorsHeaders, isAllowedOrigin, withCors } from "./lib/cors";
 import { peekRateLimit } from "./lib/rate-limit";
 import { clientId } from "./middleware/client-id";
+import assetsRoute from "./routes/assets";
 import plansRoute from "./routes/plans";
 
 export { TravelChatAgent } from "./agents/travel-chat-agent";
@@ -33,6 +34,9 @@ app.use(
   }),
 );
 
+// 静的・生成アセット配信（Cookie 付与不要、immutable キャッシュを汚さない）
+app.route("/assets", assetsRoute);
+
 // 全ルートで匿名クライアントIDを解決（無ければ発行）する。
 app.use("*", clientId);
 
@@ -40,21 +44,6 @@ app.route("/plans", plansRoute);
 
 app.get("/", (c) => c.text("Dice Travel Agent API is running!"));
 app.get("/health", (c) => c.json({ ok: true }));
-
-/** R2 からアセットを提供するエンドポイント（#18） */
-app.get("/assets/:folder/:filename", async (c) => {
-  const folder = c.req.param("folder");
-  const filename = c.req.param("filename");
-  const key = `${folder}/${filename}`;
-  const object = await c.env.BUCKET.get(key);
-  if (!object) return c.notFound();
-
-  const headers = new Headers();
-  object.writeHttpMetadata(headers);
-  headers.set("etag", object.httpEtag);
-
-  return new Response(object.body, { headers });
-});
 
 /** 現在のクライアント識別子を返す（Cookie 発行の確認・フロント初期化用）。 */
 app.get("/me", (c) => c.json({ clientId: c.get("clientId") }));

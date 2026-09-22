@@ -129,7 +129,10 @@ export async function generateItemImage(
     const ext = "png";
     const key = `generated/${crypto.randomUUID()}.${ext}`;
     await env.BUCKET.put(key, image.uint8Array, {
-      httpMetadata: { contentType: mimeType },
+      httpMetadata: {
+        contentType: mimeType,
+        cacheControl: "public, max-age=31536000, immutable",
+      },
     });
     if (abortSignal?.aborted) {
       await env.BUCKET.delete(key);

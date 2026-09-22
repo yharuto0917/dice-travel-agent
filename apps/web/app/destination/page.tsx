@@ -1,16 +1,29 @@
 "use client";
 
-import { MapTrifold, Shuffle } from "@phosphor-icons/react";
+import { CircleNotch, MapTrifold, Shuffle } from "@phosphor-icons/react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppShell } from "@/components/layout/app-shell";
-import { JapanMap3D } from "@/components/map/JapanMap3D";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { generateDestinationCandidates } from "@/lib/destinations";
 import { FLOW_STEPS } from "@/lib/flow";
 import { useDiceStore } from "@/lib/stores/diceStore";
 import { cn } from "@/lib/utils";
+
+const JapanMap3D = dynamic(
+  () => import("@/components/map/JapanMap3D").then((mod) => mod.JapanMap3D),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-full min-h-[360px] w-full flex-col items-center justify-center gap-3 bg-surface-2 rounded-3xl">
+        <CircleNotch size={40} weight="bold" className="animate-spin text-primary" />
+        <p className="text-sm font-bold text-muted">3D日本地図を読み込み中…</p>
+      </div>
+    ),
+  },
+);
 
 export default function DestinationPage() {
   const router = useRouter();

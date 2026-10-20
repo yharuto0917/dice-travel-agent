@@ -46,11 +46,12 @@ describe("parseChangelog", () => {
 });
 
 describe("getChangelog", () => {
-  it("実際の content/changelog.md を読み込める", () => {
+  it("バンドルされた content/changelog.md を読み込んでリリース一覧を返せる", () => {
     const releases = getChangelog();
     expect(releases.length).toBeGreaterThan(0);
     expect(releases[0]?.version).toMatch(/^\d+\.\d+\.\d+/);
     expect(releases[0]?.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     expect(releases[0]?.content.length).toBeGreaterThan(0);
+    expect(releases.some((r) => r.version === "0.5.3")).toBe(true);
   });
 });

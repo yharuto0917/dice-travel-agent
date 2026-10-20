@@ -1,5 +1,4 @@
-import fs from "node:fs";
-import path from "node:path";
+import changelogMarkdown from "../content/changelog.md";
 
 export interface ChangelogRelease {
   version: string;
@@ -50,34 +49,10 @@ export function parseChangelog(markdown: string): ChangelogRelease[] {
 }
 
 /**
- * content/changelog.md のパスを解決する。
- * Turbopack の静的トレースを阻害しないよう、apps/web ルートおよびモノレポルートから探索する。
- */
-function resolveChangelogPath(): string | null {
-  const defaultPath = path.join(process.cwd(), "content", "changelog.md");
-  if (fs.existsSync(defaultPath)) return defaultPath;
-
-  const monorepoPath = path.join(process.cwd(), "apps", "web", "content", "changelog.md");
-  if (fs.existsSync(monorepoPath)) return monorepoPath;
-
-  return null;
-}
-
-/**
- * content/changelog.md を読み込んでパースした結果を返す。
- * ビルド時または Server Component で実行される。
+ * ビルド時にバンドルされた content/changelog.md をパースした結果を返す。
+ * Cloudflare Workers（workerd）環境では実行時にホスト側のファイルシステム（node:fs）へ
+ * アクセスできないため、Markdown をモジュールとして静的にバンドルして参照する。
  */
 export function getChangelog(): ChangelogRelease[] {
-  const filePath = resolveChangelogPath();
-  if (!filePath) {
-    console.error("[getChangelog] changelog.md not found in any candidate paths");
-    return [];
-  }
-  try {
-    const fileContent = fs.readFileSync(filePath, "utf-8");
-    return parseChangelog(fileContent);
-  } catch (error) {
-    console.error("[getChangelog] Failed to read changelog file:", error);
-    return [];
-  }
+  return parseChangelog(changelogMarkdown);
 }

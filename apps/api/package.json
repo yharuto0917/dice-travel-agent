@@ -1,6 +1,6 @@
 {
   "name": "@repo/api",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "private": true,
   "exports": {
     ".": "./src/index.ts"
@@ -26,7 +26,7 @@
     "ai": "^6.0.208",
     "drizzle-orm": "^0.45.2",
     "hono": "^4.12.26",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260621.1",
